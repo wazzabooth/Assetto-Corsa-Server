@@ -18,6 +18,15 @@ A custom web-based management panel for [AssettoServer](https://github.com/compu
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main/install.sh)
 ```
+## Update
+
+To update to the latest version without losing any config, content or lap times:
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main/update.sh)
+```
+
+Previous version is automatically backed up to `/opt/assettoserver/backups/` before updating.
+
 
 ## Requirements
 
