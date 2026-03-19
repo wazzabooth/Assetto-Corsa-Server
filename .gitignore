@@ -1,0 +1,21 @@
+# Personal config - never commit these
+cfg/users.json
+cfg/ha_settings.json
+cfg/schedule.json
+cfg/schedule_state.json
+cfg/server_cfg.ini
+cfg/entry_list.ini
+cfg/extra_cfg.yml
+cfg/discord_cfg.json
+cfg/connection_history.json
+cfg/track_history.json
+cfg/server_state.json
+cfg/admins.txt
+cfg/presets/
+cfg/ac_logo.png
+
+# OS
+.DS_Store
+*.pyc
+__pycache__/
+*.log

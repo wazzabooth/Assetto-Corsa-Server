@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "url": "http://homeassistant.local:8123",
+  "token": "YOUR_LONG_LIVED_ACCESS_TOKEN_HERE",
+  "interval": 30
+}
