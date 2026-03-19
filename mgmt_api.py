@@ -26,6 +26,36 @@ USERS_FILE   = '/opt/assettoserver/cfg/users.json'
 PRESETS_DIR  = '/opt/assettoserver/cfg/presets'
 HISTORY_FILE = '/opt/assettoserver/cfg/connection_history.json'
 
+# ── SQLite lap database ────────────────────────────────────────────────────────
+import sqlite3
+LAP_DB = '/opt/assettoserver/cfg/laptimes.db'
+
+def get_db():
+    conn = sqlite3.connect(LAP_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS laps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player TEXT NOT NULL,
+                car TEXT DEFAULT \'\',
+                track TEXT DEFAULT \'\',
+                lap_ms INTEGER NOT NULL,
+                cuts INTEGER DEFAULT 0,
+                ts TEXT,
+                epoch INTEGER DEFAULT 0
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_laps_player_track ON laps(player, track)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_laps_track ON laps(track)')
+        conn.commit()
+    print("DB: laptimes.db ready", flush=True)
+
+init_db()
+
 SESSIONS = {}
 STATE_FILE  = '/opt/assettoserver/cfg/server_state.json'
 TRACK_LOG   = '/opt/assettoserver/cfg/track_history.json'
@@ -755,58 +785,49 @@ def get_lapboard():
     err = require_auth()
     if err: return err
     try:
-        result = subprocess.run(
-            ['journalctl', '-u', 'assettoserver', '--no-pager', '-n', '5000', '--output=short-iso'],
-            capture_output=True, text=True)
-        all_laps = []
-        best = {}
-        player_car = {}  # track current car per player
-        for line in result.stdout.splitlines():
-            if 'AssettoServer[' not in line:
-                continue
-            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
-            ts = ts_match.group(1).replace('T', ' ') if ts_match else ''
-            # Parse epoch from timestamp for track lookup
-            lap_epoch = 0
-            if ts_match:
-                try:
-                    from datetime import datetime
-                    lap_epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
-                except Exception:
-                    pass
-            ac_part = line.split('AssettoServer[', 1)[1]
-            if ']: ' in ac_part:
-                ac_part = ac_part.split(']: ', 1)[1]
-            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
-            # Track connections to record which car each player is driving
-            if 'has connected' in ac_part:
-                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
-                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
-                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
-                car = car_m.group(1).split('-')[0].strip() if car_m else ''
-                if cname and car:
-                    player_car[cname] = car
-            # Format: "Lap completed by NAME, N cuts, laptime MILLISECONDS"
-            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
-            if m:
-                name = m.group(1).strip()
-                cuts = int(m.group(2))
-                lap_ms = int(m.group(3))
-                mins = lap_ms // 60000
-                secs = (lap_ms % 60000) // 1000
-                ms = lap_ms % 1000
-                time_str = f'{mins}:{secs:02d}.{ms:03d}'
-                track = track_at_time(lap_epoch)
-                car = player_car.get(name, '')
-                entry = {'player': name, 'time': time_str, 'ms': lap_ms, 'cuts': cuts, 'ts': ts, 'track': track, 'car': car}
-                all_laps.append(entry)
-                # Best per player per track
-                key = f"{name}|{track}"
-                if key not in best or lap_ms < best[key]['ms']:
-                    best[key] = entry
-        sorted_best = sorted(best.values(), key=lambda x: x['ms'])
-        all_tracks_seen = sorted(set(l['track'] for l in all_laps if l['track'] != 'unknown'))
-        return jsonify({'best': sorted_best, 'recent': list(reversed(all_laps[:100])), 'tracks': all_tracks_seen})
+        track_filter = request.args.get('track', '')
+        with get_db() as conn:
+            # Recent laps
+            if track_filter and track_filter != 'all':
+                rows = conn.execute(
+                    'SELECT * FROM laps WHERE track=? ORDER BY epoch DESC LIMIT 200',
+                    (track_filter,)).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT * FROM laps ORDER BY epoch DESC LIMIT 200').fetchall()
+
+            all_laps = []
+            for r in rows:
+                ms = r['lap_ms']
+                mins = ms // 60000; secs = (ms % 60000) // 1000; millis = ms % 1000
+                all_laps.append({
+                    'player': r['player'], 'car': r['car'], 'track': r['track'],
+                    'time': f'{mins}:{secs:02d}.{millis:03d}',
+                    'ms': ms, 'cuts': r['cuts'], 'ts': r['ts']
+                })
+
+            # Best per player per track
+            best_rows = conn.execute('''
+                SELECT player, car, track, MIN(lap_ms) as lap_ms, cuts, ts
+                FROM laps
+                GROUP BY player, track
+                ORDER BY lap_ms ASC
+            ''').fetchall()
+            best = []
+            for r in best_rows:
+                ms = r['lap_ms']
+                mins = ms // 60000; secs = (ms % 60000) // 1000; millis = ms % 1000
+                best.append({
+                    'player': r['player'], 'car': r['car'], 'track': r['track'],
+                    'time': f'{mins}:{secs:02d}.{millis:03d}',
+                    'ms': ms, 'cuts': r['cuts'], 'ts': r['ts']
+                })
+
+            all_tracks = [r[0] for r in conn.execute(
+                'SELECT DISTINCT track FROM laps WHERE track != "" AND track != "unknown" ORDER BY track'
+            ).fetchall()]
+
+        return jsonify({'best': best, 'recent': all_laps, 'tracks': all_tracks})
     except Exception as e:
         return jsonify({'error': str(e), 'best': [], 'recent': []}), 500
 
@@ -1244,6 +1265,7 @@ def apply_event(event):
         s['TYRE_WEAR_RATE']    = str(int(event.get('tyre_wear', 1)))
         s['FUEL_RATE']         = str(int(event.get('fuel_rate', 1)))
         s['DAMAGE_MULTIPLIER'] = str(int(event.get('damage', 0)))
+        s['TYRE_BLANKETS_ALLOWED'] = str(int(event.get('tyre_blankets', 0)))
         # Sessions — only write enabled ones, remove disabled sections
         sessions = event.get('sessions', {})
         for sname in ['PRACTICE', 'QUALIFY', 'RACE']:
@@ -2051,6 +2073,93 @@ def ensure_ha_push():
 
 ensure_ha_push()
 
+
+# ── Lap watcher thread ─────────────────────────────────────────────────────────
+def lap_watcher():
+    import subprocess as sp
+    print("lap_watcher: thread started", flush=True)
+    player_car = {}
+
+    # Migrate existing journal laps into DB
+    try:
+        result = sp.run(['journalctl', '-u', 'assettoserver', '--no-pager', '-n', '10000', '--output=short-iso'],
+            capture_output=True, text=True)
+        with get_db() as conn:
+            existing = set(row[0] for row in conn.execute('SELECT epoch FROM laps').fetchall())
+        rows_to_insert = []
+        for line in result.stdout.splitlines():
+            if 'AssettoServer[' not in line: continue
+            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
+            if not ts_match: continue
+            ts = ts_match.group(1).replace('T', ' ')
+            try:
+                from datetime import datetime
+                epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
+            except: epoch = 0
+            ac_part = line.split('AssettoServer[', 1)[1]
+            if ']: ' in ac_part: ac_part = ac_part.split(']: ', 1)[1]
+            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
+            if 'has connected' in ac_part:
+                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
+                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
+                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
+                car = car_m.group(1).split('-')[0].strip() if car_m else ''
+                if cname and car: player_car[cname] = car
+            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
+            if m:
+                name = m.group(1).strip()
+                cuts = int(m.group(2))
+                lap_ms = int(m.group(3))
+                track = track_at_time(epoch)
+                car = player_car.get(name, '')
+                if epoch not in existing:
+                    rows_to_insert.append((name, car, track, lap_ms, cuts, ts, epoch))
+        if rows_to_insert:
+            with get_db() as conn:
+                conn.executemany('INSERT INTO laps (player,car,track,lap_ms,cuts,ts,epoch) VALUES (?,?,?,?,?,?,?)', rows_to_insert)
+                conn.commit()
+        print(f"lap_watcher: migrated {len(rows_to_insert)} historical laps", flush=True)
+    except Exception as e:
+        print(f"lap_watcher: migration error: {e}", flush=True)
+
+    # Tail journal for new laps
+    try:
+        proc = sp.Popen(['journalctl', '-u', 'assettoserver', '-f', '--output=short-iso'],
+            stdout=sp.PIPE, stderr=sp.DEVNULL, text=True)
+        for line in proc.stdout:
+            if 'AssettoServer[' not in line: continue
+            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
+            if not ts_match: continue
+            ts = ts_match.group(1).replace('T', ' ')
+            try:
+                from datetime import datetime
+                epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
+            except: epoch = 0
+            ac_part = line.split('AssettoServer[', 1)[1]
+            if ']: ' in ac_part: ac_part = ac_part.split(']: ', 1)[1]
+            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
+            if 'has connected' in ac_part:
+                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
+                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
+                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
+                car = car_m.group(1).split('-')[0].strip() if car_m else ''
+                if cname and car: player_car[cname] = car
+            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
+            if m:
+                name = m.group(1).strip()
+                cuts = int(m.group(2))
+                lap_ms = int(m.group(3))
+                track = track_at_time(epoch)
+                car = player_car.get(name, '')
+                with get_db() as conn:
+                    conn.execute('INSERT INTO laps (player,car,track,lap_ms,cuts,ts,epoch) VALUES (?,?,?,?,?,?,?)',
+                        (name, car, track, lap_ms, cuts, ts, epoch))
+                    conn.commit()
+                print(f"lap_watcher: saved lap {name} {track} {lap_ms}ms", flush=True)
+    except Exception as e:
+        print(f"lap_watcher: tail error: {e}", flush=True)
+
+threading.Thread(target=lap_watcher, daemon=True).start()
 
 @app.route('/public/stats')
 def public_stats():
