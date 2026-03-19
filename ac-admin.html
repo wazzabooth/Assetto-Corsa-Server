@@ -503,6 +503,12 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
               </select>
             </div>
           </div>
+          <div style="margin-top:8px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text-dim)">
+              <input type="checkbox" id="cfgTyreBlankets" onchange="onConfigChange()" style="width:15px;height:15px;accent-color:var(--amber);cursor:pointer" checked>
+              Tyre Blankets Allowed
+            </label>
+          </div>
         </div>
 
         <div class="config-section full">
@@ -975,6 +981,12 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
           <option value="0" selected>Off</option><option value="25">25%</option><option value="50">50%</option><option value="100">Full</option>
         </select>
       </div>
+    </div>
+    <div style="margin-top:8px;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text-dim)">
+        <input type="checkbox" id="seTyreBlankets" style="width:15px;height:15px;accent-color:var(--amber);cursor:pointer" checked>
+        Tyre Blankets Allowed
+      </label>
     </div>
     <div class="sec-title" style="margin-bottom:10px">⚙ Options</div>
     <div class="config-grid" style="gap:12px;margin-bottom:8px">
@@ -1654,7 +1666,7 @@ function applyConfigToForm(cfg){
   $('cfgName').value=cfg.NAME||cfg.name||'';$('cfgMaxClients').value=cfg.MAX_CLIENTS||cfg.max_clients||'20';
   $('cfgPassword').value=cfg.PASSWORD||cfg.password||'';$('cfgAdminPass').value=cfg.ADMIN_PASSWORD||cfg.admin_password||'';
   $('cfgPickup').value=cfg.PICKUP_MODE_ENABLED||cfg.pickup_mode_enabled||'1';
-  $('cfgLoop').value=cfg.LOOP_MODE||cfg.loop_mode||'1';$('cfgLobby').value=cfg.SHOW_IN_LOBBY||cfg.show_in_lobby||'0';
+  $('cfgLoop').value=cfg.LOOP_MODE||cfg.loop_mode||'1';$('cfgTyreBlankets').checked=(cfg.TYRE_BLANKETS_ALLOWED||cfg.tyre_blankets_allowed||'1')==='1';$('cfgLobby').value=cfg.SHOW_IN_LOBBY||cfg.show_in_lobby||'0';
   // Session lengths
   const p=cfg._SESSION_PRACTICE||cfg._SESSION_practice||{};
   $('sessPracticeTime').value=p.TIME||p.time||'0';$('sessPracticeOpen').value=p.IS_OPEN||p.is_open||'1';
@@ -1772,7 +1784,7 @@ async function confirmApply(){
   const payload={NAME:$('cfgName').value,TRACK:selectedTrack,CONFIG_TRACK:$('layoutSelect').value,
     CARS:[...selectedCars].join(';'),MAX_CLIENTS:$('cfgMaxClients').value,PASSWORD:$('cfgPassword').value,
     ADMIN_PASSWORD:$('cfgAdminPass').value,PICKUP_MODE_ENABLED:$('cfgPickup').value,
-    LOOP_MODE:$('cfgLoop').value,SHOW_IN_LOBBY:$('cfgLobby').value,REGISTER_TO_LOBBY:$('cfgLobby').value,
+    LOOP_MODE:$('cfgLoop').value,SHOW_IN_LOBBY:$('cfgLobby').value,REGISTER_TO_LOBBY:$('cfgLobby').value,TYRE_BLANKETS_ALLOWED:$('cfgTyreBlankets').checked?'1':'0',
     _sessions:{
       PRACTICE:{TIME:$('sessPracticeTime').value,IS_OPEN:$('sessPracticeOpen').value,NAME:'Free Practice'},
       QUALIFY:{TIME:$('sessQualifyTime').value,IS_OPEN:$('sessQualifyOpen').value,NAME:'Qualifying'},
@@ -2649,6 +2661,7 @@ function editScheduleEvent(idx){
   $('seTyreWear').value = ev.tyre_wear != null ? ev.tyre_wear : 1;
   $('seFuelRate').value  = ev.fuel_rate  != null ? ev.fuel_rate  : 1;
   $('seDamage').value    = ev.damage     != null ? ev.damage     : 0;
+  $('seTyreBlankets').checked = ev.tyre_blankets != null ? ev.tyre_blankets == 1 : true;
   populateWeatherSelects();
   applyWeatherToSeForm(ev.weather || null);
   $('seCopyBtn').style.display = idx > 0 ? '' : 'none';
@@ -2675,6 +2688,7 @@ function saveScheduleEvent(){
     tyre_wear: parseInt($('seTyreWear').value)||1,
     fuel_rate: parseInt($('seFuelRate').value)||1,
     damage: parseInt($('seDamage').value)||0,
+    tyre_blankets: $('seTyreBlankets').checked ? 1 : 0,
     weather: getSeWeather()
   };
   if(seEditIndex < 0){
