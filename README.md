@@ -16,7 +16,7 @@ A custom web-based management panel for [AssettoServer](https://github.com/compu
 
 ## Quick Install
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/YOURUSER/YOURREPO/main/install.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main/install.sh)
 ```
 
 ## Requirements
