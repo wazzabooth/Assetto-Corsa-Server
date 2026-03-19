@@ -32,9 +32,7 @@ banner() {
 
 # ── Config ────────────────────────────────────────────────────────────────────
 INSTALL_DIR="/opt/assettoserver"
-REPO_BASE="https://raw.githubusercontent.com/YOURUSER/YOURREPO/main"
 AS_GITHUB="https://api.github.com/repos/compujuckel/AssettoServer/releases/latest"
-
 AC_HTTP_PORT=8081
 AC_TCP_PORT=9600
 AC_UDP_PORT=9600
