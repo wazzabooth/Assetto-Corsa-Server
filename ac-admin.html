@@ -503,12 +503,6 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
               </select>
             </div>
           </div>
-          <div style="margin-top:8px">
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text-dim)">
-              <input type="checkbox" id="cfgTyreBlankets" onchange="onConfigChange()" style="width:15px;height:15px;accent-color:var(--amber);cursor:pointer" checked>
-              Tyre Blankets Allowed
-            </label>
-          </div>
         </div>
 
         <div class="config-section full">
@@ -848,33 +842,7 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
           <button class="btn btn-warn" onclick="saveServerSettings()" style="margin-left:8px">⚡ Apply &amp; Restart</button>
         </div>
       </div>
-      <!-- HA Integration -->
-      <div class="settings-section-header" style="margin-top:24px">
-        <div>
-          <div class="settings-section-title" style="margin-bottom:0">Home Assistant Integration</div>
-          <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-top:3px">Push server stats as sensors to Home Assistant</div>
-        </div>
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="haEnabled" onchange="saveHaSettings()" style="width:16px;height:16px;accent-color:var(--green)">
-          <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">Enabled</span>
-        </label>
-      </div>
-      <div class="config-section" style="max-width:500px;margin-top:12px">
-        <div class="field"><label>Home Assistant URL</label><input type="text" id="haUrl" placeholder="http://homeassistant.local:8123" oninput="saveHaSettings()"></div>
-        <div class="field"><label>Long-Lived Access Token</label><input type="text" id="haToken" placeholder="eyJ..." oninput="saveHaSettings()"></div>
-        <div class="field"><label>Push Interval (seconds)</label><input type="number" id="haInterval" value="30" min="10" max="300" oninput="saveHaSettings()"></div>
-        <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-          <button class="btn btn-ghost" onclick="testHaConnection()">🔗 Test Connection</button>
-          <span id="haTestResult" style="font-family:var(--mono);font-size:11px"></span>
-        </div>
-        <div style="margin-top:12px;background:rgba(0,255,136,.05);border:1px solid rgba(0,255,136,.2);padding:10px 14px;font-family:var(--mono);font-size:10px;color:var(--text-dim)">
-          Pushes these sensors:<br>
-          sensor.ac_server_players &nbsp;·&nbsp; sensor.ac_server_session<br>
-          sensor.ac_server_track &nbsp;·&nbsp; sensor.ac_server_event &nbsp;·&nbsp; sensor.ac_server_status
-        </div>
-      </div>
-
-      <div class="settings-section-header" style="margin-top:24px">
+      <div class="settings-section-header">
         <div><div class="settings-section-title" style="margin-bottom:0">User Management</div><div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-top:3px">Manage panel access</div></div>
         <button class="btn btn-primary" onclick="openCreateUser()">+ Create User</button>
       </div>
@@ -982,12 +950,6 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
         </select>
       </div>
     </div>
-    <div style="margin-top:8px;margin-bottom:8px">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-family:var(--mono);font-size:11px;color:var(--text-dim)">
-        <input type="checkbox" id="seTyreBlankets" style="width:15px;height:15px;accent-color:var(--amber);cursor:pointer" checked>
-        Tyre Blankets Allowed
-      </label>
-    </div>
     <div class="sec-title" style="margin-bottom:10px">⚙ Options</div>
     <div class="config-grid" style="gap:12px;margin-bottom:8px">
       <div class="field"><label>Server Password</label><input type="text" id="sePassword" placeholder="Leave blank for no password"></div>
@@ -1084,7 +1046,7 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
           </div>
           <div>
             <label class="field-label">Server Display Name</label>
-            <input id="dc-name" type="text" placeholder="My AC Server"
+            <input id="dc-name" type="text" placeholder="Deadbull Racing"
               style="width:100%;box-sizing:border-box;background:var(--surface);border:1px solid var(--border);color:var(--text-bright);padding:8px 10px;border-radius:4px;font-family:var(--mono);font-size:12px">
           </div>
           <div>
@@ -1467,7 +1429,7 @@ function switchTab(name){
     (name==='config'&&p.id==='tab-weather')||
     (name==='settings'&&(p.id==='tab-users'||p.id==='tab-discord'||p.id==='tab-logs'||p.id==='tab-ui-prefs'))));
   if(name==='config'&&!configLoaded)loadConfigTab();
-  if(name==='settings'){settingsLoaded=false;loadSettingsFields().catch(()=>{});loadFilterConfig();loadHaSettings();}
+  if(name==='settings'){settingsLoaded=false;loadSettingsFields().catch(()=>{});loadFilterConfig();}
   if(name==='config'&&!weatherLoaded)loadWeatherTab();
   if(name==='settings'){loadUsers();const c=document.getElementById('tab-logs').parentNode;c.appendChild(document.getElementById('tab-logs'));}
   if(name==='history')loadHistory();
@@ -1666,7 +1628,7 @@ function applyConfigToForm(cfg){
   $('cfgName').value=cfg.NAME||cfg.name||'';$('cfgMaxClients').value=cfg.MAX_CLIENTS||cfg.max_clients||'20';
   $('cfgPassword').value=cfg.PASSWORD||cfg.password||'';$('cfgAdminPass').value=cfg.ADMIN_PASSWORD||cfg.admin_password||'';
   $('cfgPickup').value=cfg.PICKUP_MODE_ENABLED||cfg.pickup_mode_enabled||'1';
-  $('cfgLoop').value=cfg.LOOP_MODE||cfg.loop_mode||'1';$('cfgTyreBlankets').checked=(cfg.TYRE_BLANKETS_ALLOWED||cfg.tyre_blankets_allowed||'1')==='1';$('cfgLobby').value=cfg.SHOW_IN_LOBBY||cfg.show_in_lobby||'0';
+  $('cfgLoop').value=cfg.LOOP_MODE||cfg.loop_mode||'1';$('cfgLobby').value=cfg.SHOW_IN_LOBBY||cfg.show_in_lobby||'0';
   // Session lengths
   const p=cfg._SESSION_PRACTICE||cfg._SESSION_practice||{};
   $('sessPracticeTime').value=p.TIME||p.time||'0';$('sessPracticeOpen').value=p.IS_OPEN||p.is_open||'1';
@@ -1784,7 +1746,7 @@ async function confirmApply(){
   const payload={NAME:$('cfgName').value,TRACK:selectedTrack,CONFIG_TRACK:$('layoutSelect').value,
     CARS:[...selectedCars].join(';'),MAX_CLIENTS:$('cfgMaxClients').value,PASSWORD:$('cfgPassword').value,
     ADMIN_PASSWORD:$('cfgAdminPass').value,PICKUP_MODE_ENABLED:$('cfgPickup').value,
-    LOOP_MODE:$('cfgLoop').value,SHOW_IN_LOBBY:$('cfgLobby').value,REGISTER_TO_LOBBY:$('cfgLobby').value,TYRE_BLANKETS_ALLOWED:$('cfgTyreBlankets').checked?'1':'0',
+    LOOP_MODE:$('cfgLoop').value,SHOW_IN_LOBBY:$('cfgLobby').value,REGISTER_TO_LOBBY:$('cfgLobby').value,
     _sessions:{
       PRACTICE:{TIME:$('sessPracticeTime').value,IS_OPEN:$('sessPracticeOpen').value,NAME:'Free Practice'},
       QUALIFY:{TIME:$('sessQualifyTime').value,IS_OPEN:$('sessQualifyOpen').value,NAME:'Qualifying'},
@@ -2661,7 +2623,6 @@ function editScheduleEvent(idx){
   $('seTyreWear').value = ev.tyre_wear != null ? ev.tyre_wear : 1;
   $('seFuelRate').value  = ev.fuel_rate  != null ? ev.fuel_rate  : 1;
   $('seDamage').value    = ev.damage     != null ? ev.damage     : 0;
-  $('seTyreBlankets').checked = ev.tyre_blankets != null ? ev.tyre_blankets == 1 : true;
   populateWeatherSelects();
   applyWeatherToSeForm(ev.weather || null);
   $('seCopyBtn').style.display = idx > 0 ? '' : 'none';
@@ -2688,7 +2649,6 @@ function saveScheduleEvent(){
     tyre_wear: parseInt($('seTyreWear').value)||1,
     fuel_rate: parseInt($('seFuelRate').value)||1,
     damage: parseInt($('seDamage').value)||0,
-    tyre_blankets: $('seTyreBlankets').checked ? 1 : 0,
     weather: getSeWeather()
   };
   if(seEditIndex < 0){
@@ -3161,44 +3121,6 @@ function rebuildFilterButtons(){
 }
 
 // Load filter config after login
-
-// ── HA Integration ────────────────────────────────────────────────────────────
-let _haSettingsSaveTimer = null;
-async function loadHaSettings(){
-  try{
-    const s = await mgmtGet('/mgmt/ha-settings');
-    $('haEnabled').checked = s.enabled || false;
-    $('haUrl').value = s.url || '';
-    $('haToken').value = s.token || '';
-    $('haInterval').value = s.interval || 30;
-  }catch(e){}
-}
-function saveHaSettings(){
-  clearTimeout(_haSettingsSaveTimer);
-  _haSettingsSaveTimer = setTimeout(async()=>{
-    try{
-      await mgmtPost('/mgmt/ha-settings',{
-        enabled: $('haEnabled').checked,
-        url: $('haUrl').value,
-        token: $('haToken').value,
-        interval: parseInt($('haInterval').value)||30
-      });
-    }catch(e){}
-  }, 800);
-}
-async function testHaConnection(){
-  const el = $('haTestResult');
-  el.style.color='var(--text-dim)';
-  el.textContent='Testing...';
-  try{
-    const r = await mgmtPost('/mgmt/ha-test',{url:$('haUrl').value,token:$('haToken').value});
-    el.style.color='var(--green)';
-    el.textContent='✓ ' + (r.message||'Connected!');
-  }catch(e){
-    el.style.color='var(--red)';
-    el.textContent='✗ ' + e.message;
-  }
-}
 </script>
 
 

@@ -9,11 +9,10 @@ import threading as _threading
 _cpu_value = 0.0
 def _cpu_sampler():
     global _cpu_value
-    import psutil
-    psutil.cpu_percent(interval=None)  # prime it
+    _cpu_value  # prime it
     while True:
         time.sleep(5)
-        _cpu_value = psutil.cpu_percent(interval=None)
+        _cpu_value = _cpu_value
 _threading.Thread(target=_cpu_sampler, daemon=True).start()
 
 app = Flask(__name__)
@@ -25,36 +24,6 @@ CONTENT      = '/opt/assettoserver/content'
 USERS_FILE   = '/opt/assettoserver/cfg/users.json'
 PRESETS_DIR  = '/opt/assettoserver/cfg/presets'
 HISTORY_FILE = '/opt/assettoserver/cfg/connection_history.json'
-
-# ── SQLite lap database ────────────────────────────────────────────────────────
-import sqlite3
-LAP_DB = '/opt/assettoserver/cfg/laptimes.db'
-
-def get_db():
-    conn = sqlite3.connect(LAP_DB)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    with get_db() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS laps (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                player TEXT NOT NULL,
-                car TEXT DEFAULT \'\',
-                track TEXT DEFAULT \'\',
-                lap_ms INTEGER NOT NULL,
-                cuts INTEGER DEFAULT 0,
-                ts TEXT,
-                epoch INTEGER DEFAULT 0
-            )
-        ''')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_laps_player_track ON laps(player, track)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_laps_track ON laps(track)')
-        conn.commit()
-    print("DB: laptimes.db ready", flush=True)
-
-init_db()
 
 SESSIONS = {}
 STATE_FILE  = '/opt/assettoserver/cfg/server_state.json'
@@ -785,49 +754,58 @@ def get_lapboard():
     err = require_auth()
     if err: return err
     try:
-        track_filter = request.args.get('track', '')
-        with get_db() as conn:
-            # Recent laps
-            if track_filter and track_filter != 'all':
-                rows = conn.execute(
-                    'SELECT * FROM laps WHERE track=? ORDER BY epoch DESC LIMIT 200',
-                    (track_filter,)).fetchall()
-            else:
-                rows = conn.execute(
-                    'SELECT * FROM laps ORDER BY epoch DESC LIMIT 200').fetchall()
-
-            all_laps = []
-            for r in rows:
-                ms = r['lap_ms']
-                mins = ms // 60000; secs = (ms % 60000) // 1000; millis = ms % 1000
-                all_laps.append({
-                    'player': r['player'], 'car': r['car'], 'track': r['track'],
-                    'time': f'{mins}:{secs:02d}.{millis:03d}',
-                    'ms': ms, 'cuts': r['cuts'], 'ts': r['ts']
-                })
-
-            # Best per player per track
-            best_rows = conn.execute('''
-                SELECT player, car, track, MIN(lap_ms) as lap_ms, cuts, ts
-                FROM laps
-                GROUP BY player, track
-                ORDER BY lap_ms ASC
-            ''').fetchall()
-            best = []
-            for r in best_rows:
-                ms = r['lap_ms']
-                mins = ms // 60000; secs = (ms % 60000) // 1000; millis = ms % 1000
-                best.append({
-                    'player': r['player'], 'car': r['car'], 'track': r['track'],
-                    'time': f'{mins}:{secs:02d}.{millis:03d}',
-                    'ms': ms, 'cuts': r['cuts'], 'ts': r['ts']
-                })
-
-            all_tracks = [r[0] for r in conn.execute(
-                'SELECT DISTINCT track FROM laps WHERE track != "" AND track != "unknown" ORDER BY track'
-            ).fetchall()]
-
-        return jsonify({'best': best, 'recent': all_laps, 'tracks': all_tracks})
+        result = subprocess.run(
+            ['journalctl', '-u', 'assettoserver', '--no-pager', '-n', '5000', '--output=short-iso'],
+            capture_output=True, text=True)
+        all_laps = []
+        best = {}
+        player_car = {}  # track current car per player
+        for line in result.stdout.splitlines():
+            if 'AssettoServer[' not in line:
+                continue
+            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
+            ts = ts_match.group(1).replace('T', ' ') if ts_match else ''
+            # Parse epoch from timestamp for track lookup
+            lap_epoch = 0
+            if ts_match:
+                try:
+                    from datetime import datetime
+                    lap_epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
+                except Exception:
+                    pass
+            ac_part = line.split('AssettoServer[', 1)[1]
+            if ']: ' in ac_part:
+                ac_part = ac_part.split(']: ', 1)[1]
+            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
+            # Track connections to record which car each player is driving
+            if 'has connected' in ac_part:
+                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
+                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
+                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
+                car = car_m.group(1).split('-')[0].strip() if car_m else ''
+                if cname and car:
+                    player_car[cname] = car
+            # Format: "Lap completed by NAME, N cuts, laptime MILLISECONDS"
+            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
+            if m:
+                name = m.group(1).strip()
+                cuts = int(m.group(2))
+                lap_ms = int(m.group(3))
+                mins = lap_ms // 60000
+                secs = (lap_ms % 60000) // 1000
+                ms = lap_ms % 1000
+                time_str = f'{mins}:{secs:02d}.{ms:03d}'
+                track = track_at_time(lap_epoch)
+                car = player_car.get(name, '')
+                entry = {'player': name, 'time': time_str, 'ms': lap_ms, 'cuts': cuts, 'ts': ts, 'track': track, 'car': car}
+                all_laps.append(entry)
+                # Best per player per track
+                key = f"{name}|{track}"
+                if key not in best or lap_ms < best[key]['ms']:
+                    best[key] = entry
+        sorted_best = sorted(best.values(), key=lambda x: x['ms'])
+        all_tracks_seen = sorted(set(l['track'] for l in all_laps if l['track'] != 'unknown'))
+        return jsonify({'best': sorted_best, 'recent': list(reversed(all_laps[:100])), 'tracks': all_tracks_seen})
     except Exception as e:
         return jsonify({'error': str(e), 'best': [], 'recent': []}), 500
 
@@ -1265,7 +1243,6 @@ def apply_event(event):
         s['TYRE_WEAR_RATE']    = str(int(event.get('tyre_wear', 1)))
         s['FUEL_RATE']         = str(int(event.get('fuel_rate', 1)))
         s['DAMAGE_MULTIPLIER'] = str(int(event.get('damage', 0)))
-        s['TYRE_BLANKETS_ALLOWED'] = str(int(event.get('tyre_blankets', 0)))
         # Sessions — only write enabled ones, remove disabled sections
         sessions = event.get('sessions', {})
         for sname in ['PRACTICE', 'QUALIFY', 'RACE']:
@@ -1904,262 +1881,6 @@ def _resolve_track_name(track_id):
                     pass
     return track_id
 
-
-# ── HA Integration ─────────────────────────────────────────────────────────────
-HA_SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cfg', 'ha_settings.json')
-
-def load_ha_settings():
-    try:
-        return json.load(open(HA_SETTINGS_FILE))
-    except:
-        return {'enabled': False, 'url': '', 'token': '', 'interval': 30}
-
-def save_ha_settings(s):
-    json.dump(s, open(HA_SETTINGS_FILE, 'w'), indent=2)
-
-@app.route('/mgmt/ha-settings', methods=['GET'])
-def get_ha_settings():
-    err = require_auth()
-    if err: return err
-    return jsonify(load_ha_settings())
-
-@app.route('/mgmt/ha-settings', methods=['POST'])
-def save_ha_settings_route():
-    err = require_auth()
-    if err: return err
-    data = request.json
-    s = load_ha_settings()
-    s['enabled'] = data.get('enabled', False)
-    s['url'] = data.get('url', '').rstrip('/')
-    s['token'] = data.get('token', '')
-    s['interval'] = int(data.get('interval', 30))
-    save_ha_settings(s)
-    return jsonify({'ok': True})
-
-@app.route('/mgmt/ha-test', methods=['POST'])
-def test_ha():
-    err = require_auth()
-    if err: return err
-    s = load_ha_settings()
-    url = request.json.get('url', s['url']).rstrip('/')
-    token = request.json.get('token', s['token'])
-    try:
-        import urllib.request as ur
-        req = ur.Request(f'{url}/api/', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-        with ur.urlopen(req, timeout=5) as r:
-            data = json.loads(r.read())
-        return jsonify({'ok': True, 'message': data.get('message', 'Connected!')})
-    except Exception as e:
-        return jsonify({'ok': False, 'message': str(e)}), 400
-
-def push_to_ha():
-    """Background thread: push AC stats to Home Assistant as sensors."""
-    import urllib.request as ur
-    print("ha_push: thread started", flush=True)
-    while True:
-        try:
-            s = load_ha_settings()
-            interval = max(10, s.get('interval', 30))
-            if not s.get('enabled') or not s.get('url') or not s.get('token'):
-                time.sleep(interval)
-                continue
-            # Get current stats
-            try:
-                with ur.urlopen(f'{AC_HTTP}/api/details', timeout=5) as r:
-                    d = json.loads(r.read())
-                ac_online = True
-            except:
-                ac_online = False
-                d = {}
-
-            # If AC is offline, push offline state and continue
-            if not ac_online:
-                offline_sensors = [
-                    ('sensor.ac_server_status',    'Offline', {'friendly_name': 'AC Server Status',     'icon': 'mdi:server-off'}),
-                    ('sensor.ac_server_players',   '0/0',     {'friendly_name': 'AC Players',            'icon': 'mdi:account-group'}),
-                    ('sensor.ac_server_connected', 0,         {'friendly_name': 'AC Connected Players',  'icon': 'mdi:account', 'unit_of_measurement': 'players'}),
-                    ('sensor.ac_server_session',   'Offline', {'friendly_name': 'AC Session',            'icon': 'mdi:flag-checkered'}),
-                    ('sensor.ac_server_track',     'Unknown', {'friendly_name': 'AC Track',              'icon': 'mdi:map-marker'}),
-                ]
-                ha_url = s['url']
-                token = s['token']
-                headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-                for entity_id, state_val, attrs in offline_sensors:
-                    try:
-                        payload = json.dumps({'state': str(state_val), 'attributes': attrs}).encode()
-                        req = ur.Request(f'{ha_url}/api/states/{entity_id}', data=payload, headers=headers, method='POST')
-                        with ur.urlopen(req, timeout=5) as r:
-                            pass
-                    except:
-                        pass
-                print("ha_push: AC offline, pushed offline state", flush=True)
-                time.sleep(interval)
-                continue
-            connected = sum(1 for c in d.get('players',{}).get('Cars',[]) if c.get('IsConnected'))
-            slots = len(d.get('players',{}).get('Cars',[]))
-            sess_map = {1:'Practice', 2:'Qualifying', 3:'Race'}
-            sess_types = d.get('sessiontypes', [])
-            sess_idx = d.get('session', 0)
-            sess_type = sess_types[sess_idx] if sess_idx < len(sess_types) else (sess_types[-1] if sess_types else 0)
-            session = sess_map.get(sess_type, 'Unknown')
-            sched = load_schedule()
-            state = load_sched_state()
-            events = sched.get('events', [])
-            current_event = events[state.get('current_index', 0)].get('name', '') if events else ''
-            track_raw = d.get('track', '')
-            track_name = _resolve_track_name(track_raw)
-            event_name = _resolve_track_name(current_event) if current_event else ''
-
-            # Schedule extras
-            next_idx = state.get('current_index', 0) + 1
-            next_event = events[next_idx].get('name', '') if next_idx < len(events) else ''
-            next_event_name = _resolve_track_name(next_event) if next_event else 'None'
-            events_total = len(events)
-
-            # System resources
-            try:
-                import psutil
-                cpu = _cpu_value
-                mem_pct = psutil.virtual_memory().percent
-                disk_pct = psutil.disk_usage('/').percent
-            except:
-                cpu = 0; mem_pct = 0; disk_pct = 0
-
-            sensors = [
-                # Players
-                ('sensor.ac_server_players',         f'{connected}/{slots}',  {'friendly_name': 'AC Players',            'icon': 'mdi:account-group'}),
-                ('sensor.ac_server_connected',       connected,               {'friendly_name': 'AC Connected Players',   'icon': 'mdi:account', 'unit_of_measurement': 'players'}),
-                ('sensor.ac_server_max_slots',       slots,                   {'friendly_name': 'AC Max Slots',           'icon': 'mdi:account-multiple', 'unit_of_measurement': 'slots'}),
-                # Session
-                ('sensor.ac_server_session',         session,                 {'friendly_name': 'AC Session',             'icon': 'mdi:flag-checkered'}),
-                ('sensor.ac_server_track',           track_name,              {'friendly_name': 'AC Track',               'icon': 'mdi:map-marker'}),
-                ('sensor.ac_server_status',          'Online',                {'friendly_name': 'AC Server Status',       'icon': 'mdi:server'}),
-                # Schedule
-                ('sensor.ac_server_event',           event_name,              {'friendly_name': 'AC Current Event',       'icon': 'mdi:calendar'}),
-                ('sensor.ac_server_next_event',      next_event_name,         {'friendly_name': 'AC Next Event',          'icon': 'mdi:calendar-arrow-right'}),
-                ('sensor.ac_server_events_total',    events_total,            {'friendly_name': 'AC Events in Schedule',  'icon': 'mdi:format-list-numbered', 'unit_of_measurement': 'events'}),
-                ('sensor.ac_server_loop',            'on' if sched.get('loop') else 'off', {'friendly_name': 'AC Schedule Loop', 'icon': 'mdi:repeat'}),
-                # System
-                ('sensor.ac_server_cpu',             round(cpu, 1),           {'friendly_name': 'AC Server CPU',          'icon': 'mdi:cpu-64-bit',      'unit_of_measurement': '%'}),
-                ('sensor.ac_server_memory',          round(mem_pct, 1),       {'friendly_name': 'AC Server Memory',       'icon': 'mdi:memory',          'unit_of_measurement': '%'}),
-                ('sensor.ac_server_disk',            round(disk_pct, 1),      {'friendly_name': 'AC Server Disk',         'icon': 'mdi:harddisk',        'unit_of_measurement': '%'}),
-            ]
-
-            ha_url = s['url']
-            token = s['token']
-            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-
-            for entity_id, state_val, attrs in sensors:
-                payload = json.dumps({'state': str(state_val), 'attributes': attrs}).encode()
-                req = ur.Request(f'{ha_url}/api/states/{entity_id}', data=payload, headers=headers, method='POST')
-                with ur.urlopen(req, timeout=5) as r:
-                    pass
-
-            print(f"ha_push: pushed {len(sensors)} sensors (players={connected}/{slots}, session={session}, track={track_name})", flush=True)
-
-        except Exception as e:
-            print(f"ha_push error: {e}", flush=True)
-        time.sleep(interval)
-
-_ha_thread = None
-_ha_lock = threading.Lock()
-
-def ensure_ha_push():
-    global _ha_thread
-    with _ha_lock:
-        if _ha_thread is None or not _ha_thread.is_alive():
-            _ha_thread = threading.Thread(target=push_to_ha, daemon=True)
-            _ha_thread.start()
-
-ensure_ha_push()
-
-
-# ── Lap watcher thread ─────────────────────────────────────────────────────────
-def lap_watcher():
-    import subprocess as sp
-    print("lap_watcher: thread started", flush=True)
-    player_car = {}
-
-    # Migrate existing journal laps into DB
-    try:
-        result = sp.run(['journalctl', '-u', 'assettoserver', '--no-pager', '-n', '10000', '--output=short-iso'],
-            capture_output=True, text=True)
-        with get_db() as conn:
-            existing = set(row[0] for row in conn.execute('SELECT epoch FROM laps').fetchall())
-        rows_to_insert = []
-        for line in result.stdout.splitlines():
-            if 'AssettoServer[' not in line: continue
-            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
-            if not ts_match: continue
-            ts = ts_match.group(1).replace('T', ' ')
-            try:
-                from datetime import datetime
-                epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
-            except: epoch = 0
-            ac_part = line.split('AssettoServer[', 1)[1]
-            if ']: ' in ac_part: ac_part = ac_part.split(']: ', 1)[1]
-            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
-            if 'has connected' in ac_part:
-                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
-                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
-                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
-                car = car_m.group(1).split('-')[0].strip() if car_m else ''
-                if cname and car: player_car[cname] = car
-            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
-            if m:
-                name = m.group(1).strip()
-                cuts = int(m.group(2))
-                lap_ms = int(m.group(3))
-                track = track_at_time(epoch)
-                car = player_car.get(name, '')
-                if epoch not in existing:
-                    rows_to_insert.append((name, car, track, lap_ms, cuts, ts, epoch))
-        if rows_to_insert:
-            with get_db() as conn:
-                conn.executemany('INSERT INTO laps (player,car,track,lap_ms,cuts,ts,epoch) VALUES (?,?,?,?,?,?,?)', rows_to_insert)
-                conn.commit()
-        print(f"lap_watcher: migrated {len(rows_to_insert)} historical laps", flush=True)
-    except Exception as e:
-        print(f"lap_watcher: migration error: {e}", flush=True)
-
-    # Tail journal for new laps
-    try:
-        proc = sp.Popen(['journalctl', '-u', 'assettoserver', '-f', '--output=short-iso'],
-            stdout=sp.PIPE, stderr=sp.DEVNULL, text=True)
-        for line in proc.stdout:
-            if 'AssettoServer[' not in line: continue
-            ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})', line)
-            if not ts_match: continue
-            ts = ts_match.group(1).replace('T', ' ')
-            try:
-                from datetime import datetime
-                epoch = int(datetime.strptime(ts_match.group(1), '%Y-%m-%dT%H:%M:%S').timestamp())
-            except: epoch = 0
-            ac_part = line.split('AssettoServer[', 1)[1]
-            if ']: ' in ac_part: ac_part = ac_part.split(']: ', 1)[1]
-            ac_part = re.sub(r'^\[\d{2}:\d{2}:\d{2} \w+\] ', '', ac_part)
-            if 'has connected' in ac_part:
-                cm = re.search(r'^(.+?) \([\w\d]+, \d+', ac_part)
-                cname = cm.group(1).strip() if cm else ac_part.split(' has')[0].strip()
-                car_m = re.search(r'\d+ \((.+?)\)', ac_part)
-                car = car_m.group(1).split('-')[0].strip() if car_m else ''
-                if cname and car: player_car[cname] = car
-            m = re.search(r'Lap completed by (.+?), (\d+) cuts, laptime (\d+)', ac_part)
-            if m:
-                name = m.group(1).strip()
-                cuts = int(m.group(2))
-                lap_ms = int(m.group(3))
-                track = track_at_time(epoch)
-                car = player_car.get(name, '')
-                with get_db() as conn:
-                    conn.execute('INSERT INTO laps (player,car,track,lap_ms,cuts,ts,epoch) VALUES (?,?,?,?,?,?,?)',
-                        (name, car, track, lap_ms, cuts, ts, epoch))
-                    conn.commit()
-                print(f"lap_watcher: saved lap {name} {track} {lap_ms}ms", flush=True)
-    except Exception as e:
-        print(f"lap_watcher: tail error: {e}", flush=True)
-
-threading.Thread(target=lap_watcher, daemon=True).start()
 
 @app.route('/public/stats')
 def public_stats():

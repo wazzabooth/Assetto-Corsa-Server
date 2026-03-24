@@ -1,2 +1,42 @@
-# AssettoServer extra configuration
-EnableRaceControl: true
+AI:
+  DefaultAggression: 0
+  DefaultSkillLevel: 70
+  Enabled: false
+  MaxCount: 10
+AdminUserGroup: default_admins
+AfkKickBehavior: PlayerInput
+BlacklistUserGroup: default_blacklist
+CorsAllowedOrigins:
+- '*'
+EnableAi: false
+EnableAlternativeCarChecksums: false
+EnableAntiAfk: true
+EnableRealTime: false
+EnableServerDetails: true
+EnableUPnP: false
+EnableWeatherFx: true
+IgnoreConfigurationErrors:
+  BrakePowerModifier: true
+  MissingAiSpline: true
+  MissingCarChecksums: true
+  MissingCarEtcChecksums: true
+  MissingCarEtcFolder: true
+  MissingDefaultSetup: true
+  MissingTrackParams: true
+  TyreBlanketNotAllowed: true
+  UnsafeAdminWhitelist: false
+  UnsignedConfigurationFile: true
+  WrongServerDetails: false
+LockServerDate: false
+MandatoryClientSecurityLevel: 0
+MaxAfkTimeMinutes: 10
+MaxPing: 500
+MaxPingSeconds: 10
+PlayerChecksumTimeoutSeconds: 40
+PlayerLoadingTimeoutMinutes: 10
+UseSteamAuth: false
+UserGroups:
+  default_admins: admins.txt
+  default_blacklist: blacklist.txt
+  default_whitelist: whitelist.txt
+WhitelistUserGroup: default_whitelist

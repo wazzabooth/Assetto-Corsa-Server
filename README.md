@@ -2,6 +2,19 @@
 
 A custom web-based management panel for [AssettoServer](https://github.com/compujuckel/AssettoServer), designed for Proxmox LXC on Ubuntu 22.04/24.04.
 
+## Compatibility
+
+| Component | Tested Version |
+|-----------|---------------|
+| AssettoServer | v0.0.54 |
+| Custom Shaders Patch | v0.3.0-preview212 (ID: 3749) |
+| Ubuntu | 22.04 / 24.04 |
+
+**Important notes:**
+- Do NOT add a `[DYNAMIC_TRACK]` section to `server_cfg.ini` — this causes handshake failures
+- Do NOT enable `EnableWeatherFx: true` in `extra_cfg.yml` unless all clients have a compatible CSP version
+- CSP v0.2.11 is NOT compatible with this server setup — use v0.3.0-preview212 or later
+
 ## Features
 
 - Single Race configuration with track/car picker
