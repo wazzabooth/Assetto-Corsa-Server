@@ -1245,18 +1245,27 @@ def apply_event(event):
         s['DAMAGE_MULTIPLIER'] = str(int(event.get('damage', 0)))
         # Sessions — only write enabled ones, remove disabled sections
         sessions = event.get('sessions', {})
-        for sname in ['PRACTICE', 'QUALIFY', 'RACE']:
-            sdata = sessions.get(sname, {})
-            enabled = sdata.get('enabled', True)
-            if enabled and sdata:
-                if not cfg.has_section(sname):
-                    cfg.add_section(sname)
-                for k, v in sdata.items():
-                    if k.upper() != 'ENABLED':
-                        cfg[sname][k.upper()] = str(v)
-            else:
-                if cfg.has_section(sname):
-                    cfg.remove_section(sname)
+        any_session_enabled = False
+        # AssettoServer only supports RACE section - PRACTICE and QUALIFY cause handshake failures
+        # Remove any existing PRACTICE/QUALIFY sections
+        for sname in ['PRACTICE', 'QUALIFY']:
+            if cfg.has_section(sname):
+                cfg.remove_section(sname)
+        # Write RACE section
+        rdata = sessions.get('RACE', {})
+        if not cfg.has_section('RACE'):
+            cfg.add_section('RACE')
+        if rdata:
+            for k, v in rdata.items():
+                if k.upper() != 'ENABLED':
+                    cfg['RACE'][k.upper()] = str(v)
+        # Safety net defaults
+        if not cfg['RACE'].get('LAPS') and not cfg['RACE'].get('TIME'):
+            cfg['RACE']['LAPS'] = '5'
+        if not cfg['RACE'].get('WAIT_TIME'):
+            cfg['RACE']['WAIT_TIME'] = '60'
+        if not cfg['RACE'].get('IS_OPEN'):
+            cfg['RACE']['IS_OPEN'] = '1'
         with open(CFG, 'w') as f:
             cfg.write(f)
         # Regenerate entry_list.ini from event cars
@@ -1276,8 +1285,7 @@ def apply_event(event):
             extra['AI']['Enabled'] = bool(event.get('ai_traffic', False))
             # Weather
             weather = event.get('weather')
-            if weather and weather.get('enabled'):
-                extra['EnableWeatherFx'] = bool(weather.get('enable_weatherfx', False))
+            # EnableWeatherFx intentionally not set here - causes CSP handshake issues
             with open(EXTRA_CFG, 'w') as f:
                 yaml.dump(extra, f, default_flow_style=False, allow_unicode=True)
 
@@ -1311,10 +1319,8 @@ def apply_event(event):
             for i, slot in enumerate(slots):
                 sec = f'WEATHER_{i}'
                 cfg.add_section(sec)
-                # Convert numeric WeatherFX type ID to correct GRAPHICS format
-                gfx = slot.get('graphics', '15')
-                if gfx.lstrip('-').isdigit():
-                    gfx = f'sol_03_scattered_clouds_type={gfx}_time=0_mult=0'
+                # Use graphics string directly - standard AC format
+                gfx = slot.get('graphics', '3_clear')
                 cfg[sec]['GRAPHICS'] = gfx
                 cfg[sec]['BASE_TEMPERATURE_AMBIENT']  = str(int(slot.get('ambient', 22)))
                 cfg[sec]['BASE_TEMPERATURE_ROAD']     = str(int(slot.get('road', 32)))
@@ -1329,13 +1335,7 @@ def apply_event(event):
                         cfg.remove_option(sec, k)
             with open(CFG, 'w') as f:
                 cfg.write(f)
-            # Enable WeatherFx so AssettoServer honours WEATHER_N sections
-            if os.path.exists(EXTRA_CFG):
-                with open(EXTRA_CFG) as f:
-                    extra2 = yaml.safe_load(f) or {}
-                extra2['EnableWeatherFx'] = True
-                with open(EXTRA_CFG, 'w') as f:
-                    yaml.dump(extra2, f, default_flow_style=False, allow_unicode=True)
+            # EnableWeatherFx intentionally NOT set - causes CSP handshake failures
         # Log track change
         save_state(event.get('track', ''), event.get('layout', ''))
         # Restart server
@@ -1467,6 +1467,7 @@ def schedule_monitor():
                 empty_since = None
 
             # Detect session change (natural progression)
+            # Only advance on session change if players have actually joined
             if last_session_name is None:
                 last_session_name = session_name
                 continue
@@ -1477,9 +1478,18 @@ def schedule_monitor():
                 empty_since = None  # reset on any session change
                 expected = count_enabled_sessions(events[idx])
                 if session_changes >= expected:
-                    session_changes = 0
-                    last_session_name = None
-                    advance_event(state, sched, events, idx)
+                    # Only advance if players have joined at some point
+                    # (connected > 0 means someone is currently in, but we also
+                    # want to advance if someone WAS in and left naturally)
+                    # If nobody ever joined and we're advancing, skip it
+                    if connected <= 0 and empty_since is None:
+                        # Nobody joined - don't advance via session change, let empty timeout handle it
+                        print(f'schedule_monitor: session changed but no players joined, waiting for empty timeout')
+                        session_changes = 0
+                    else:
+                        session_changes = 0
+                        last_session_name = None
+                        advance_event(state, sched, events, idx)
         except Exception as e:
             import traceback; print(f'schedule_monitor error: {e}\n' + traceback.format_exc(), flush=True)
 

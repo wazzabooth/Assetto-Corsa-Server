@@ -716,6 +716,7 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
             Loop
           </label>
           <button class="btn btn-ghost" id="schedSaveBtn" onclick="saveSchedule()">💾 Save</button>
+          <button class="btn btn-ghost" id="schedPracticeBtn" onclick="startPracticeLobby()" title="Start an open practice lobby on the current track with current cars">🏎 Practice Lobby</button>
           <button class="btn btn-warn" id="schedStartBtn" onclick="startSchedule()">▶ Start Schedule</button>
           <button class="btn btn-ghost" id="schedStopBtn" onclick="stopSchedule()" style="display:none">⏹ Stop</button>
           <button class="btn btn-ghost" id="schedNextBtn" onclick="nextScheduleEvent()" style="display:none">⏭ Next Event</button>
@@ -892,25 +893,17 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
     </div>
     <div id="seCarList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px;max-height:160px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);padding:8px;margin-bottom:16px"></div>
 
-    <div class="sec-title" style="margin-bottom:10px">⏱ Sessions</div>
+    <div class="sec-title" style="margin-bottom:10px">⏱ Race Session</div>
     <div style="margin-bottom:12px">
-      <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;padding:0 4px;margin-bottom:6px">
-        <span></span><span>Duration (mins)</span><span>Laps (Race only)</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.1em;padding:0 4px;margin-bottom:6px">
+        <span>Duration (mins, 0 = use laps)</span><span>Laps (0 = use duration)</span>
       </div>
-      <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;align-items:center;margin-bottom:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text-bright);cursor:pointer"><input type="checkbox" id="sePRACTICEEn" checked> Practice</label>
-        <input type="number" id="sePRACTICETime" value="0" min="0" style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box">
-        <input type="number" value="0" disabled style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box;opacity:.4">
-      </div>
-      <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;align-items:center;margin-bottom:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text-bright);cursor:pointer"><input type="checkbox" id="seQUALIFYEn" checked> Qualify</label>
-        <input type="number" id="seQUALIFYTime" value="15" min="0" style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box">
-        <input type="number" value="0" disabled style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box;opacity:.4">
-      </div>
-      <div style="display:grid;grid-template-columns:90px 1fr 1fr;gap:8px;align-items:center;margin-bottom:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--text-bright);cursor:pointer"><input type="checkbox" id="seRACEEn" checked> Race</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-bottom:6px">
         <input type="number" id="seRACETime" value="0" min="0" style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box">
         <input type="number" id="seRACELaps" value="5" min="0" style="background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none;width:100%;box-sizing:border-box">
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-top:4px">
+        💡 For a practice lobby, set Duration to 9999 and Laps to 0
       </div>
     </div>
 
@@ -2574,11 +2567,9 @@ function addScheduleEvent(){
   $('seLayout').innerHTML = '<option value="">default</option>';
   populateSeCarList([]);
   $('seCarSearch').value = '';
-  $('sePRACTICEEn').checked = true;
-  $('seQUALIFYEn').checked = true;
-  $('seRACEEn').checked = true;
-  $('sePRACTICETime').value = 0;
-  $('seQUALIFYTime').value = 15;
+  // Practice/Qualify removed - AssettoServer only supports RACE sessions
+  // Race always enabled
+  // Practice/Qualify time fields removed
   $('seRACETime').value = 0;
   $('seRACELaps').value = 5;
   $('sePassword').value = '';
@@ -2612,12 +2603,9 @@ function editScheduleEvent(idx){
   populateSeCarList(ev.cars || []);
   $('seCarSearch').value = '';
   const sess = ev.sessions || {};
-  ['PRACTICE','QUALIFY','RACE'].forEach(s=>{
-    const d = sess[s] || {};
-    $(`se${s}En`).checked = d.enabled !== false;
-    $(`se${s}Time`).value = d.TIME || 0;
-    if(s==='RACE') $('seRACELaps').value = d.LAPS || 5;
-  });
+  const raceData = sess['RACE'] || {};
+  $('seRACETime').value = raceData.TIME || 0;
+  $('seRACELaps').value = raceData.LAPS || 5;
   $('sePassword').value = ev.password || '';
   $('seAiTraffic').value = ev.ai_traffic ? '1' : '0';
   $('seTyreWear').value = ev.tyre_wear != null ? ev.tyre_wear : 1;
@@ -2640,9 +2628,9 @@ function saveScheduleEvent(){
     layout: $('seLayout').value || '',
     cars,
     sessions:{
-      PRACTICE:{ enabled:$('sePRACTICEEn').checked, TIME:parseInt($('sePRACTICETime').value)||0 },
-      QUALIFY:{ enabled:$('seQUALIFYEn').checked, TIME:parseInt($('seQUALIFYTime').value)||15 },
-      RACE:{ enabled:$('seRACEEn').checked, TIME:parseInt($('seRACETime').value)||0, LAPS:parseInt($('seRACELaps').value)||5 }
+      PRACTICE:{ enabled:false, TIME:0 },
+      QUALIFY:{ enabled:false, TIME:0 },
+      RACE:{ enabled:true, TIME:parseInt($('seRACETime').value)||0, LAPS:parseInt($('seRACELaps').value)||5 }
     },
     password: $('sePassword').value,
     ai_traffic: $('seAiTraffic').value === '1',
@@ -3121,6 +3109,32 @@ function rebuildFilterButtons(){
 }
 
 // Load filter config after login
+
+// ── Practice Lobby ────────────────────────────────────────────────────────────
+async function startPracticeLobby(){
+  try {
+    // Get current server config to use same track/cars
+    const cfg = await mgmtGet('/mgmt/config');
+    const track = cfg.TRACK || cfg.track || '';
+    const layout = cfg.CONFIG_TRACK || cfg.config_track || '';
+    const cars = (cfg.CARS || cfg.cars || '').split(';').filter(Boolean);
+
+    if(!track){ toast('No track configured', 'error'); return; }
+
+    // Apply a practice-mode event - race session with 9999 min duration
+    await mgmtPost('/mgmt/config', {
+      ...cfg,
+      _sessions: {
+        RACE: { TIME: 9999, LAPS: 0, WAIT_TIME: 0, IS_OPEN: 1, NAME: 'Practice' }
+      }
+    });
+    await mgmtPost('/mgmt/restart', {});
+    toast('Practice lobby started — open join, no time limit', 'info');
+    setTimeout(fetchAll, 5000);
+  } catch(e) {
+    toast('Failed to start practice lobby: ' + e.message, 'error');
+  }
+}
 </script>
 
 
