@@ -1929,4 +1929,61 @@ def public_stats():
         import traceback
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
+
+@app.route('/mgmt/kick', methods=['POST'])
+def kick_player():
+    err = require_auth('admin')
+    if err: return err
+    data = request.json or {}
+    car_id = data.get('car_id', data.get('carId'))
+    if car_id is None:
+        return jsonify({'error': 'car_id required'}), 400
+    try:
+        cfg = configparser.RawConfigParser()
+        cfg.read(CFG)
+        admin_pass = cfg.get('SERVER', 'ADMIN_PASSWORD', fallback='')
+        payload = json.dumps({'adminPassword': admin_pass, 'carId': int(car_id)}).encode()
+        req = urllib.request.Request(
+            'http://localhost:8081/api/admin/kick',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST')
+        urllib.request.urlopen(req, timeout=3)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/mgmt/ban', methods=['POST'])
+def ban_player():
+    err = require_auth('admin')
+    if err: return err
+    data = request.json or {}
+    guid = data.get('guid', '').strip()
+    if not guid:
+        return jsonify({'error': 'guid required'}), 400
+    try:
+        blacklist = '/opt/assettoserver/cfg/blacklist.txt'
+        existing = open(blacklist).read() if os.path.exists(blacklist) else ''
+        if guid not in existing:
+            with open(blacklist, 'a') as f:
+                f.write(guid + '\n')
+        car_id = data.get('car_id')
+        if car_id is not None:
+            try:
+                cfg = configparser.RawConfigParser()
+                cfg.read(CFG)
+                admin_pass = cfg.get('SERVER', 'ADMIN_PASSWORD', fallback='')
+                payload = json.dumps({'adminPassword': admin_pass, 'carId': int(car_id)}).encode()
+                req = urllib.request.Request(
+                    'http://localhost:8081/api/admin/kick',
+                    data=payload,
+                    headers={'Content-Type': 'application/json'},
+                    method='POST')
+                urllib.request.urlopen(req, timeout=3)
+            except:
+                pass
+        return jsonify({'ok': True, 'note': 'GUID added to blacklist'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 app.run(host='0.0.0.0', port=8083)
