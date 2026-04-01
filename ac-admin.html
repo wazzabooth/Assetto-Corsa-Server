@@ -343,15 +343,9 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
       <button class="btn btn-logout" onclick="doLogout()">Logout</button>
     </div>
   </header>
-  <div class="settings-bar">
-    <span class="lbl">AC Server</span><input class="si w240" id="serverUrl" type="text" value="" placeholder="Auto (current page)">
-    <span class="lbl">Mgmt API</span><input class="si w240" id="mgmtUrl" type="text" value="" placeholder="Auto (current page)">
-    <button class="btn btn-primary" onclick="connectAC()">Connect</button>
-    <button class="btn btn-ghost" onclick="disconnectAC()">Disconnect</button>
-  </div>
+
   <div class="tabs">
     <div class="tab active" onclick="switchTab('overview')">Overview</div>
-    <div class="tab" id="tabConfig" onclick="switchTab('config')">Single Race</div>
     <div class="tab" onclick="switchTab('schedule')">Schedule</div>
     <div class="tab" onclick="switchTab('lapboard')">Lap Board</div>
     <div class="tab" onclick="switchTab('history')">History</div>
@@ -395,14 +389,6 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
           <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">Loading...</div>
         </div>
         <div class="divider"></div>
-        <div class="panel-header"><span class="panel-title">Quick Actions</span></div>
-        <div class="action-grid">
-          <button class="action-btn" id="btnNextSess" onclick="serverAction('next_session')"><span class="action-icon">⏭</span>Next Session</button>
-          <button class="action-btn" id="btnRestart" onclick="serverAction('restart_session')"><span class="action-icon">↺</span>Restart Session</button>
-          <button class="action-btn" style="opacity:.35;cursor:not-allowed" title="Use /say in-game"><span class="action-icon">📢</span>Broadcast</button>
-          <button class="action-btn" onclick="fetchAll()"><span class="action-icon">⟳</span>Refresh Now</button>
-        </div>
-        <div class="divider"></div>
         <div class="panel-header"><span class="panel-title">Activity Log</span></div>
         <div class="log-panel" id="logPanel"><div class="log-entry"><span class="log-time">--:--:--</span><span class="log-msg info">Waiting for connection...</span></div></div>
       </div>
@@ -422,154 +408,6 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
   </div>
 
   <!-- CONFIG -->
-  <div class="tab-page" id="tab-config">
-    <div class="config-wrap">
-      <div class="config-section full" style="margin-bottom:16px">
-        <div class="sec-header">
-          <span class="sec-title" style="margin:0;padding:0;border:none">Server Presets</span>
-          <button class="btn btn-primary btn-sm" onclick="openSavePreset()">+ Save Current as Preset</button>
-        </div>
-        <div class="preset-list" id="presetList"><div style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">Loading presets...</div></div>
-      </div>
-      <div class="config-grid">
-        <div class="config-section">
-          <div class="sec-title">Track Selection</div>
-          <input class="search-input" id="trackSearch" placeholder="Search tracks..." oninput="filterTracks()">
-          <div class="track-list" id="trackList"></div>
-          <div class="field" style="margin-top:8px"><label>Layout / Config</label>
-            <div id="layoutThumbStrip" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
-            <input type="hidden" id="layoutSelect">
-          </div>
-          <div id="trackPreviewWrap" style="display:none;margin-top:8px;position:relative">
-            <img id="trackPreviewImg" style="width:100%;height:100px;object-fit:cover;border:1px solid var(--border)" onerror="this.closest('#trackPreviewWrap').style.display='none'">
-            <img id="trackOutlineImg" style="position:absolute;right:6px;bottom:6px;height:52px;width:52px;object-fit:contain;filter:brightness(0) invert(1);opacity:.7" onerror="this.style.display='none'">
-          </div>
-        </div>
-        <div class="config-section">
-          <div class="sec-title">Allowed Cars</div>
-          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px" id="carFilterBtns">
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('')" id="cf-all" style="font-size:10px;padding:2px 8px;opacity:1">All</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('gt3')" id="cf-gt3" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="gt3">GT3</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('gt4')" id="cf-gt4" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="gt4">GT4</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('drift')" id="cf-drift" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="drift">Drift</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('btcc')" id="cf-btcc" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="btcc">BTCC</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('vintage')" id="cf-vintage" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="vintage">Vintage</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('street')" id="cf-street" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="street">Street</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('race')" id="cf-race" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="race">Race</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('jdm')" id="cf-jdm" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="jdm">JDM</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('#90s touring car')" id="cf-90s" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="#90s touring car">90s Touring</button>
-            <button class="btn btn-ghost btn-sm" onclick="setCarFilter('traffic')" id="cf-traffic" style="font-size:10px;padding:2px 8px;opacity:.5" data-filter="traffic">Traffic</button>
-          </div>
-          <div style="display:flex;gap:6px;margin-bottom:6px">
-            <input class="search-input" id="carSearch" placeholder="Search cars..." oninput="filterCars()" style="margin:0;flex:1">
-            <button class="btn btn-ghost btn-sm" onclick="deselectAllCars()" style="white-space:nowrap;flex-shrink:0">✕ Deselect All</button>
-          </div>
-          <div class="car-list" id="carList"></div>
-          <div class="selected-count" id="carSelectedCount">0 cars selected</div>
-        </div>
-
-        <div class="config-section">
-          <div class="sec-title">Session Type</div>
-          <div class="sess-grid">
-            <div class="sess-opt active" data-sess="PRACTICE" onclick="selectSess(this)">Practice</div>
-            <div class="sess-opt" data-sess="QUALIFY" onclick="selectSess(this)">Qualify</div>
-            <div class="sess-opt" data-sess="RACE" onclick="selectSess(this)">Race</div>
-            <div class="sess-opt" data-sess="HOTLAP" onclick="selectSess(this)">Hotlap</div>
-            <div class="sess-opt" data-sess="DRIFT" onclick="selectSess(this)">Drift</div>
-            <div class="sess-opt" data-sess="TIME_ATTACK" onclick="selectSess(this)">Time Attack</div>
-          </div>
-          <div class="divider"></div>
-          <div class="sec-title">Options</div>
-          <div class="field"><label>Pickup Mode</label><select id="cfgPickup"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
-          <div class="field"><label>Loop Mode</label><select id="cfgLoop"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
-          <div class="field"><label>Visible in Lobby</label><select id="cfgLobby"><option value="0">No (LAN only)</option><option value="1">Yes (public)</option></select></div>
-        </div>
-        <div class="config-section full">
-          <div class="sec-title">Race Rules</div>
-          <div class="config-grid">
-            <div class="field"><label>Tyre Wear</label>
-              <select id="cfgTyreWear" onchange="onConfigChange()" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none">
-                <option value="0">Off</option><option value="1">Normal</option><option value="2">x2</option><option value="3">x3</option><option value="4">x4</option>
-              </select>
-            </div>
-            <div class="field"><label>Fuel Rate</label>
-              <select id="cfgFuelRate" onchange="onConfigChange()" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none">
-                <option value="0">Off</option><option value="1">Normal</option><option value="2">x2</option><option value="3">x3</option>
-              </select>
-            </div>
-            <div class="field"><label>Damage</label>
-              <select id="cfgDamage" onchange="onConfigChange()" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text-bright);font-family:var(--mono);font-size:12px;padding:6px 10px;outline:none">
-                <option value="0">Off</option><option value="25">25%</option><option value="50">50%</option><option value="100">Full</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="config-section full">
-          <div class="sec-title">Session Lengths</div>
-          <div class="config-grid" style="gap:12px">
-            <div class="config-section" style="background:var(--surface2)">
-              <div class="sec-title" style="color:var(--blue)">🏎 Practice</div>
-              <div class="field"><label>Duration (minutes, 0 = unlimited)</label><input type="number" id="sessPracticeTime" min="0" max="9999" value="0"></div>
-              <div class="field"><label>Open Pits</label><select id="sessPracticeOpen"><option value="1">Yes</option><option value="0">No</option></select></div>
-            </div>
-            <div class="config-section" style="background:var(--surface2)">
-              <div class="sec-title" style="color:var(--amber)">⏱ Qualifying</div>
-              <div class="field"><label>Duration (minutes, 0 = unlimited)</label><input type="number" id="sessQualifyTime" min="0" max="9999" value="15"></div>
-              <div class="field"><label>Open Pits</label><select id="sessQualifyOpen"><option value="1">Yes</option><option value="0">No</option></select></div>
-            </div>
-            <div class="config-section" style="background:var(--surface2)">
-              <div class="sec-title" style="color:var(--green)">🏁 Race</div>
-              <div class="field"><label>Laps (0 = use time instead)</label><input type="number" id="sessRaceLaps" min="0" max="9999" value="10"></div>
-              <div class="field"><label>Duration (minutes, 0 = use laps)</label><input type="number" id="sessRaceTime" min="0" max="9999" value="0"></div>
-              <div class="field"><label>Wait Time Before Start (seconds)</label><input type="number" id="sessRaceWait" min="0" max="600" value="60"></div>
-              <div class="field"><label>Open Pits</label><select id="sessRaceOpen"><option value="1">Yes</option><option value="0">No</option></select></div>
-            </div>
-          </div>
-        </div>
-          <div class="config-grid" style="gap:12px">
-            <div class="field"><label>AI Traffic</label><select id="cfgAiEnabled"><option value="false">Disabled</option><option value="true">Enabled</option></select></div>
-            <div class="field"><label>Max AI Cars</label><input type="number" id="cfgAiCount" min="1" max="100" value="10"></div>
-            <div class="field"><label>Skill Level — <span id="cfgAiSkillVal">70</span>%</label><input type="range" id="cfgAiSkill" min="0" max="100" value="70" oninput="$('cfgAiSkillVal').textContent=this.value" style="width:100%;accent-color:var(--red);cursor:pointer"></div>
-            <div class="field"><label>Aggression — <span id="cfgAiAggrVal">0</span>%</label><input type="range" id="cfgAiAggr" min="0" max="100" value="0" oninput="$('cfgAiAggrVal').textContent=this.value" style="width:100%;accent-color:var(--red);cursor:pointer"></div>
-          </div>
-        </div>
-
-        <!-- Opponents -->
-        <div class="config-section full">
-          <div class="sec-title">Opponents / AI Mode</div>
-          <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:12px">Choose how AI is used on this server. Traffic = cars freely roaming. Race Grid = AI drivers on the starting grid racing against you.</div>
-          <div class="sess-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">
-            <div class="sess-opt active" data-mode="none" onclick="selectAiMode(this)">🚫 None</div>
-            <div class="sess-opt" data-mode="traffic" onclick="selectAiMode(this)">🚗 AI Traffic</div>
-          </div>
-          <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);padding:10px;background:var(--bg);border:1px solid var(--border);margin-bottom:12px">
-            ⚠ Race grid AI opponents are not supported by AssettoServer. For organised races, invite real players. AI Traffic places cars freely on track driving around you.
-          </div>
-
-          <!-- Traffic settings -->
-          <div id="trafficSettings" style="display:none">
-            <div class="sec-title" style="color:var(--blue);margin-bottom:10px">🚗 AI Traffic Settings</div>
-            <div class="config-grid" style="gap:12px;margin-bottom:16px">
-              <div class="field"><label>Max Traffic Cars</label><input type="number" id="cfgAiCount" min="1" max="100" value="10"></div>
-              <div class="field"><label>Skill Level — <span id="cfgAiSkillVal">70</span>%</label><input type="range" id="cfgAiSkill" min="0" max="100" value="70" oninput="$('cfgAiSkillVal').textContent=this.value" style="width:100%;accent-color:var(--blue);cursor:pointer"></div>
-              <div class="field"><label>Aggression — <span id="cfgAiAggrVal">0</span>%</label><input type="range" id="cfgAiAggr" min="0" max="100" value="0" oninput="$('cfgAiAggrVal').textContent=this.value" style="width:100%;accent-color:var(--blue);cursor:pointer"></div>
-              <div class="field"><label>Min AI Count (always spawn this many)</label><input type="number" id="cfgAiMin" min="0" max="50" value="0"></div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-    </div>
-    <div class="apply-bar">
-      <div class="apply-info">Config changes require a restart — <span>connected players will be kicked</span></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" onclick="resetConfig()">↺ Reset</button>
-        <button class="btn btn-warn" onclick="openApplyModal(true)">⚡ Apply &amp; Restart</button>
-      </div>
-    </div>
-  </div>
-
   <!-- WEATHER -->
   <div class="tab-page" id="tab-weather">
     <div class="weather-wrap">
@@ -853,7 +691,6 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
       </div>
     </div>
   </div>
-</div>
 
 <!-- Modals -->
 <div class="modal-overlay" id="kickModal"><div class="modal">
@@ -1016,7 +853,7 @@ div[data-layout]:hover{background:rgba(255,255,255,.04);}
 
         <div style="margin-top:28px;padding:0 24px">
           <div class="settings-section-title">Car Filter Buttons</div>
-          <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:12px">Choose which filter buttons appear on the Single Race and Schedule car lists. Tags are loaded from your installed cars.</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:12px">Choose which filter buttons appear on the Schedule car list. Tags are loaded from your installed cars.</div>
           <div id="filterConfigArea" style="background:var(--s1);border:1px solid var(--border);padding:16px">
             <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">Loading tags...</div>
           </div>
@@ -1138,8 +975,8 @@ let weatherSlots=[], openPickerSlot=-1;
 let countdownEnd=null, countdownTimer=null, sessionInfoCache=null;
 
 const $=id=>document.getElementById(id);
-const getMgmt=()=>{const v=$('mgmtUrl').value.replace(/\/$/,'');return v||window.location.origin;};
-const getAC=()=>{const v=$('serverUrl').value.replace(/\/$/,'');return v||window.location.origin;};
+const getMgmt=()=>window.location.origin;
+const getAC=()=>window.location.origin;
 
 // ── Login ──────────────────────────────────────────────────────────────────────
 async function doLogin(){
@@ -1156,18 +993,17 @@ async function doLogin(){
     const d=await r.json();
     if(!r.ok){$('loginError').textContent=d.error||'Login failed';return;}
     sessionToken=d.token;currentUser=d.username;currentRole=d.role;window._cachedUser=user;window._cachedPass=pass;window._cachedMgmt=mgmt;
-    $('mgmtUrl').value='';$('serverUrl').value='';
     $('loginScreen').classList.add('hidden');$('app').classList.add('visible');
     $('headerUser').textContent=currentUser;
     $('headerRole').textContent=currentRole.toUpperCase();
     $('headerRole').className='urole '+(currentRole==='admin'?'admin':'');
-    applyRoleRestrictions();connectAC();
-  }catch(e){$('loginError').textContent='Connection failed — check API URL';}
+  }catch(e){$('loginError').textContent='Connection failed — '+e.message;return;}
+  applyRoleRestrictions();connectAC();
 }
 
 function applyRoleRestrictions(){
   if(currentRole!=='admin'){
-    ['tabConfig','tabWeather','tabUsers'].forEach(id=>$(id).classList.add('hidden'));
+    ['tabUsers'].forEach(id=>{const el=$(id);if(el)el.classList.add('hidden');});
     ['btnNextSess','btnRestart'].forEach(id=>{const el=$(id);if(el)el.disabled=true;});
   }
 }
@@ -1413,17 +1249,12 @@ function renderPlayers(cars,containerId,detailed){
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 function switchTab(name){
-  const names=['overview','config','schedule','lapboard','history','resources','settings'];
-  const applyBar = document.querySelector('.apply-bar');
-  if(applyBar) applyBar.style.display = (name==='settings') ? 'none' : '';
+  const names=['overview','schedule','lapboard','history','resources','settings'];
   document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',names[i]===name));
   document.querySelectorAll('.tab-page').forEach(p=>p.classList.toggle('active',
     p.id==='tab-'+name||
-    (name==='config'&&p.id==='tab-weather')||
     (name==='settings'&&(p.id==='tab-users'||p.id==='tab-discord'||p.id==='tab-logs'||p.id==='tab-ui-prefs'))));
-  if(name==='config'&&!configLoaded)loadConfigTab();
   if(name==='settings'){settingsLoaded=false;loadSettingsFields().catch(()=>{});loadFilterConfig();}
-  if(name==='config'&&!weatherLoaded)loadWeatherTab();
   if(name==='settings'){loadUsers();const c=document.getElementById('tab-logs').parentNode;c.appendChild(document.getElementById('tab-logs'));}
   if(name==='history')loadHistory();
   if(name==='lapboard')loadLapboard();
@@ -1432,7 +1263,6 @@ function switchTab(name){
   if(name==='resources')initResources();
   if(name==='discord'){ loadDiscordCfg(); setTimeout(()=>{ const m=document.getElementById('applyModal'); if(m) m.classList.remove('open'); },50); }
   closeAllPickers();
-  if(name!=='config'){ const m=document.getElementById('applyModal'); if(m) m.classList.remove('open'); }
 }
 
 // ── Config tab ─────────────────────────────────────────────────────────────────
@@ -1582,12 +1412,6 @@ function renderCarList(){
 }
 function setCarFilter(...tags){
   _carFilter=tags.flat().filter(Boolean);
-  document.querySelectorAll('#carFilterBtns button').forEach(b=>{
-    try{const bv=JSON.parse(b.dataset.filter||'[]');
-      const match=JSON.stringify(bv)===JSON.stringify(_carFilter)||(_carFilter.length===0&&bv.length===0);
-      b.style.opacity=match?'1':'.5';b.style.borderColor=match?'var(--red)':'';
-    }catch(e){}
-  });
   filterCars();
 }
 function filterCars(){renderCarList();}
@@ -1659,7 +1483,7 @@ async function resetConfig(){try{const cfg=await mgmtGet('/mgmt/config');applyCo
 async function openApplyModal(fromUser=false){
   if(!fromUser) return;
   const activeTab = document.querySelector('.tab-page.active');
-  if(!activeTab || (activeTab.id !== 'tab-config' && activeTab.id !== 'tab-users')) return;
+  if(!activeTab || activeTab.id !== 'tab-users') return;
   if(!selectedTrack){toast('Select a track first','error');return;}
   if(!selectedCars.size){toast('Select at least one car','error');return;}
   $('applyWarning').style.display='none';
@@ -2306,7 +2130,9 @@ async function loadScheduleTab(){
   try{
     // Load tracks/cars if not already loaded
     if(!seAllTracks.length){
-      const [tracks,cars] = await Promise.all([mgmtGet('/mgmt/tracks'), mgmtGet('/mgmt/cars')]);
+      const [tracks,cars,tn,cn] = await Promise.all([mgmtGet('/mgmt/tracks'), mgmtGet('/mgmt/cars'), mgmtGet('/mgmt/track-names').catch(()=>({})), mgmtGet('/mgmt/car-names').catch(()=>({}))]);
+      _trackNames = tn || _trackNames;
+      _carNames   = cn || _carNames;
       seAllTracks = tracks;
       seAllCars = cars.map(c => typeof c === 'object' ? c.id : c);
       seAllCars_data = cars;
@@ -2871,8 +2697,21 @@ async function confirmKick(){
 function openModal(id){$(id).classList.add('open');}
 function closeModal(id){$(id).classList.remove('open');}
 function connectAC(){
+
+// ── Track/Car name lookup ──────────────────────────────────────────────────────
+async function fetchNameLookups(){
+  try{
+    const [tn,cn] = await Promise.all([
+      mgmtGet('/mgmt/track-names').catch(()=>({})),
+      mgmtGet('/mgmt/car-names').catch(()=>({}))
+    ]);
+    _trackNames = tn || {};
+    _carNames   = cn || {};
+  }catch(e){}
+}
+
   setStatus('connecting','CONNECTING');logMsg(`Connecting to ${getAC()}...`,'info');
-  fetchAll();fetchStats();fetchSyncthing();
+  fetchAll();fetchStats();fetchSyncthing();fetchNameLookups();
   if(pollInterval)clearInterval(pollInterval);
   if(syncInterval)clearInterval(syncInterval);
   pollInterval=setInterval(()=>{fetchAll();fetchStats();},8000);
@@ -3088,15 +2927,6 @@ async function saveFilterConfig(){
 }
 
 function rebuildFilterButtons(){
-  // Rebuild Single Race filter buttons
-  const cr = document.getElementById('carFilterBtns');
-  if(cr){
-    cr.innerHTML = _filterConfig.map(f=>
-      `<button class="btn btn-ghost btn-sm" data-filter="${escH(f.value)}" onclick="setCarFilter('${escH(f.value)}')"
-        style="font-size:10px;padding:2px 8px;opacity:${_carFilter===f.value?'1':'.5'};border-color:${_carFilter===f.value?'var(--red)':''}"
-      >${escH(f.label)}</button>`
-    ).join('');
-  }
   // Rebuild Schedule filter buttons (will be created next time populateSeCarList runs)
   const sr = document.getElementById('seCarFilterBtns');
   if(sr){
@@ -3146,5 +2976,6 @@ async function startPracticeLobby(){
     <div class="car-tooltip-stats" id="carTooltipStats"></div>
   </div>
 </div>
+</div><!-- end .app -->
 </body>
 </html>
