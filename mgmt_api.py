@@ -7,12 +7,27 @@ import hashlib, secrets, time, re
 # Background CPU sampler - updates every 5s, stores result for instant reads
 import threading as _threading
 _cpu_value = 0.0
+_PROXMOX_HOST  = '192.168.1.66'
+_PROXMOX_TOKEN = 'PVEAPIToken=root@pam!acmanager=82403791-ac62-4b7b-81bc-9fb4c336215c'
+_PROXMOX_VMID  = 125
+
 def _cpu_sampler():
     global _cpu_value
-    _cpu_value  # prime it
     while True:
-        time.sleep(5)
-        _cpu_value = _cpu_value
+        try:
+            import ssl, urllib.request
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            url = f'https://{_PROXMOX_HOST}:8006/api2/json/nodes/pve/lxc/{_PROXMOX_VMID}/status/current'
+            req = urllib.request.Request(url, headers={'Authorization': _PROXMOX_TOKEN})
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
+                import json
+                d = json.loads(r.read())
+                _cpu_value = round(d['data']['cpu'] * 100, 1)
+        except Exception as e:
+            pass
+        time.sleep(10)
 _threading.Thread(target=_cpu_sampler, daemon=True).start()
 
 app = Flask(__name__)
@@ -565,11 +580,13 @@ def get_stats():
                     continue
     except Exception:
         pass
+    net = psutil.net_io_counters()
     return jsonify({
         'cpu': cpu, 'mem_used': mem.used, 'mem_total': mem.total,
         'mem_percent': mem.percent, 'disk_used': disk.used,
         'disk_total': disk.total, 'disk_percent': disk.percent,
-        'uptime': uptime_secs
+        'uptime': uptime_secs,
+        'net_sent': net.bytes_sent, 'net_recv': net.bytes_recv
     })
 
 # ── Weather ────────────────────────────────────────────────────────────────────
@@ -1983,6 +2000,30 @@ def ban_player():
             except:
                 pass
         return jsonify({'ok': True, 'note': 'GUID added to blacklist'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/mgmt/laps', methods=['GET'])
+def get_laps():
+    err = require_auth()
+    if err: return err
+    try:
+        track = request.args.get('track', None)
+        limit = int(request.args.get('limit', 20))
+        with get_db() as conn:
+            if track:
+                rows = conn.execute(
+                    'SELECT player, car, track, lap_ms, cuts, ts FROM laps WHERE track=? AND cuts=0 ORDER BY lap_ms ASC LIMIT ?',
+                    (track, limit)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT player, car, track, lap_ms, cuts, ts FROM laps WHERE cuts=0 ORDER BY lap_ms ASC LIMIT ?',
+                    (limit,)
+                ).fetchall()
+        laps = [{'driver': r[0], 'car': r[1], 'track': r[2], 'lap_ms': r[3], 'cuts': r[4], 'ts': r[5]} for r in rows]
+        return jsonify({'laps': laps})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -4,10 +4,10 @@
 #  Install Script for Ubuntu 22.04 / 24.04 LXC (Proxmox)
 #
 #  Usage (one-liner):
-#    bash <(wget -qO- https://raw.githubusercontent.com/YOURUSER/YOURREPO/main/install.sh)
+#    bash <(wget -qO- https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main/install.sh)
 #
 #  Or download and run:
-#    wget https://raw.githubusercontent.com/YOURUSER/YOURREPO/main/install.sh
+#    wget https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main/install.sh
 #    bash install.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -56,6 +56,7 @@ echo "   • Flask API backend (port ${MGMT_PORT})"
 echo "   • Web panel server (port ${WEB_PORT})"
 echo "   • Systemd services (auto-start on boot)"
 echo "   • UFW firewall rules"
+echo "   • Syncthing content sync (optional)"
 echo ""
 
 # ── Gather config ─────────────────────────────────────────────────────────────
@@ -88,6 +89,54 @@ if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
   [[ -z "$CF_TOKEN" ]] && warn "No token provided — skipping Cloudflare setup" && USE_CF="n"
 fi
 
+# ── Proxmox CPU config ────────────────────────────────────────────────────────
+echo ""
+echo -e "  ${CYAN}── Proxmox CPU Integration ──────────────────────────────────────${NC}"
+echo "  psutil reads host CPU stats inside an LXC, which is inaccurate."
+echo "  The Proxmox API provides real per-container CPU usage instead."
+echo ""
+read -rp "  Configure Proxmox CPU polling? [y/N]: " USE_PROXMOX
+USE_PROXMOX="${USE_PROXMOX:-n}"
+PVE_HOST=""; PVE_TOKEN=""; PVE_VMID=""
+
+if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
+  read -rp "  Proxmox host IP (e.g. 192.168.1.66): " PVE_HOST
+  read -rp "  Proxmox API token (PVEAPIToken=root@pam!name=secret): " PVE_TOKEN
+  read -rp "  This LXC's VMID (shown in Proxmox UI sidebar): " PVE_VMID
+fi
+
+# ── Syncthing config ──────────────────────────────────────────────────────────
+echo ""
+echo -e "  ${CYAN}── Syncthing Content Sync ───────────────────────────────────────${NC}"
+echo "  Syncthing keeps your AC content in sync with your PC or NAS."
+echo "  The server is set to RECEIVE ONLY — your PC pushes changes."
+echo ""
+read -rp "  Install Syncthing? [y/N]: " USE_SYNCTHING
+USE_SYNCTHING="${USE_SYNCTHING:-n}"
+SYNC_FOLDERS=()
+SYNC_LABELS=()
+
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "  Enter folder paths to sync (receive-only). Press ENTER with no input when done."
+  echo "  Common choices:"
+  echo "    ${INSTALL_DIR}/content/cars"
+  echo "    ${INSTALL_DIR}/content/tracks"
+  echo "    ${INSTALL_DIR}/content"
+  echo ""
+  while true; do
+    read -rp "  Folder path (or ENTER to finish): " FPATH
+    [ -z "$FPATH" ] && break
+    FPATH="${FPATH/#\~/$HOME}"
+    read -rp "  Label for this folder (e.g. Cars, Tracks): " FLABEL
+    FLABEL="${FLABEL:-$(basename "$FPATH")}"
+    SYNC_FOLDERS+=("$FPATH")
+    SYNC_LABELS+=("$FLABEL")
+    ok "  Added: $FLABEL → $FPATH"
+  done
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 echo -e "  ${BOLD}Summary:${NC}"
@@ -98,11 +147,9 @@ echo "  Max clients:   $MAX_CLIENTS"
 echo "  Install dir:   $INSTALL_DIR"
 echo "  Web panel:     http://${LOCAL_IP}:${WEB_PORT}"
 echo "  AC ports:      ${AC_TCP_PORT} TCP/UDP"
-if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
-  echo "  Cloudflare:    Yes"
-else
-  echo "  Cloudflare:    No"
-fi
+[[ "$USE_CF" =~ ^[Yy]$ ]]       && echo "  Cloudflare:    Yes"          || echo "  Cloudflare:    No"
+[[ "$USE_PROXMOX" =~ ^[Yy]$ ]]  && echo "  Proxmox CPU:   ${PVE_HOST} VMID ${PVE_VMID}" || echo "  Proxmox CPU:   No"
+[[ "$USE_SYNCTHING" =~ ^[Yy]$ ]] && echo "  Syncthing:     Yes (${#SYNC_FOLDERS[@]} folder(s))" || echo "  Syncthing:     No"
 echo "  ─────────────────────────────────────────"
 echo ""
 read -rp "  Proceed with install? [Y/n]: " CONFIRM
@@ -167,6 +214,66 @@ done
 
 chmod +x "${INSTALL_DIR}/mgmt_api.py"
 chmod +x "${INSTALL_DIR}/webserver.py"
+
+# ── Proxmox CPU patch ─────────────────────────────────────────────────────────
+if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
+  banner "Proxmox CPU Integration"
+  info "Testing Proxmox connection..."
+
+  STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
+    -H "Authorization: ${PVE_TOKEN}" \
+    "https://${PVE_HOST}:8006/api2/json/nodes/pve/lxc/${PVE_VMID}/status/current" || echo "000")
+
+  if [ "$STATUS" = "200" ]; then
+    ok "Proxmox connection successful (VMID ${PVE_VMID})"
+  else
+    warn "Proxmox returned HTTP ${STATUS} — check token/VMID. You can re-run configure_proxmox_cpu.sh later."
+  fi
+
+  python3 << PYEOF
+import re, sys
+
+src = open('${INSTALL_DIR}/mgmt_api.py').read()
+
+new_sampler = """_cpu_value = 0.0
+_PROXMOX_HOST  = '${PVE_HOST}'
+_PROXMOX_TOKEN = '${PVE_TOKEN}'
+_PROXMOX_VMID  = ${PVE_VMID}
+
+def _cpu_sampler():
+    global _cpu_value
+    while True:
+        try:
+            import ssl, urllib.request, json as _json
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            url = f'https://{_PROXMOX_HOST}:8006/api2/json/nodes/pve/lxc/{_PROXMOX_VMID}/status/current'
+            req = urllib.request.Request(url, headers={'Authorization': _PROXMOX_TOKEN})
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
+                d = _json.loads(r.read())
+                _cpu_value = round(d['data']['cpu'] * 100, 1)
+        except Exception:
+            pass
+        time.sleep(10)"""
+
+src = re.sub(
+    r'_cpu_value = 0\.0\ndef _cpu_sampler\(\):.*?(?=_threading\.Thread)',
+    new_sampler + '\n',
+    src, count=1, flags=re.DOTALL
+)
+
+open('${INSTALL_DIR}/mgmt_api.py', 'w').write(src)
+
+import ast
+try:
+    ast.parse(src)
+    print('\033[0;32m[ OK ]\033[0m  Proxmox CPU polling configured')
+except SyntaxError as e:
+    print(f'\033[1;33m[WARN]\033[0m  Syntax check failed: {e} — check mgmt_api.py manually')
+PYEOF
+
+fi
 
 # ── Initial config files ──────────────────────────────────────────────────────
 banner "Initial configuration"
@@ -331,6 +438,98 @@ systemctl start acadmin-api acadmin-web
 ok "Services enabled and started"
 info "assettoserver will start once you have content installed"
 
+# ── Syncthing ─────────────────────────────────────────────────────────────────
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+  banner "Syncthing"
+  info "Installing Syncthing..."
+
+  curl -fsSL https://syncthing.net/release-key.gpg \
+    | gpg --dearmor -o /usr/share/keyrings/syncthing-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/syncthing-archive-keyring.gpg] \
+    https://apt.syncthing.net/ syncthing stable" \
+    > /etc/apt/sources.list.d/syncthing.list
+  apt-get update -qq
+  apt-get install -y -qq syncthing
+  ok "Syncthing installed"
+
+  # Create any missing sync folders
+  for FPATH in "${SYNC_FOLDERS[@]}"; do
+    mkdir -p "$FPATH"
+  done
+
+  # Generate config by running briefly
+  info "Generating Syncthing config..."
+  ST_CONFIG="/root/.local/share/syncthing"
+  timeout 5 syncthing --home="$ST_CONFIG" --no-browser 2>/dev/null || true
+  sleep 2
+
+  # Open GUI to all interfaces (LAN reachable)
+  if [ -f "$ST_CONFIG/config.xml" ]; then
+    sed -i 's|<address>127\.0\.0\.1:8384</address>|<address>0.0.0.0:8384</address>|g' \
+      "$ST_CONFIG/config.xml"
+    ok "GUI accessible on port 8384"
+  fi
+
+  # Inject receive-only folder entries
+  if [ ${#SYNC_FOLDERS[@]} -gt 0 ] && [ -f "$ST_CONFIG/config.xml" ]; then
+    FOLDER_XML=""
+    for i in "${!SYNC_FOLDERS[@]}"; do
+      FPATH="${SYNC_FOLDERS[$i]}"
+      FLABEL="${SYNC_LABELS[$i]}"
+      FID=$(echo "$FLABEL" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+      FOLDER_XML="${FOLDER_XML}
+    <folder id=\"${FID}\" label=\"${FLABEL}\" path=\"${FPATH}\" type=\"receiveonly\" rescanIntervalS=\"3600\" fsWatcherEnabled=\"true\" fsWatcherDelayS=\"10\">
+      <filesystemType>basic</filesystemType>
+      <ignorePerms>false</ignorePerms>
+      <autoNormalize>true</autoNormalize>
+      <minDiskFree unit=\"%\">1</minDiskFree>
+      <versioning></versioning>
+      <order>random</order>
+      <ignoreDelete>false</ignoreDelete>
+      <paused>false</paused>
+      <markerName>.stfolder</markerName>
+    </folder>"
+    done
+    sed -i "s|</configuration>|${FOLDER_XML}\n</configuration>|" "$ST_CONFIG/config.xml"
+    ok "${#SYNC_FOLDERS[@]} receive-only folder(s) configured"
+  fi
+
+  # Systemd service
+  cat > /etc/systemd/system/syncthing.service << EOF
+[Unit]
+Description=Syncthing — Content Sync
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/syncthing --home=${ST_CONFIG} --no-browser --logflags=0
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable syncthing
+  systemctl start syncthing
+  sleep 2
+
+  DEVICE_ID=$(syncthing --home="$ST_CONFIG" --device-id 2>/dev/null || echo "Check GUI")
+  ok "Syncthing running"
+  echo ""
+  echo -e "  ${BOLD}Syncthing Device ID:${NC}"
+  echo "  $DEVICE_ID"
+  echo ""
+  info "Open http://${LOCAL_IP}:8384 to accept your PC as a remote device"
+  ufw allow 8384/tcp > /dev/null 2>&1 || true
+  ufw allow 22000/tcp > /dev/null 2>&1 || true
+  ufw allow 22000/udp > /dev/null 2>&1 || true
+fi
+
 # ── Cloudflare Tunnel ─────────────────────────────────────────────────────────
 if [[ "$USE_CF" =~ ^[Yy]$ ]] && [[ -n "$CF_TOKEN" ]]; then
   banner "Cloudflare Tunnel"
@@ -348,12 +547,12 @@ fi
 # ── Firewall ──────────────────────────────────────────────────────────────────
 banner "Firewall"
 ufw --force enable > /dev/null 2>&1 || true
-ufw allow ssh              > /dev/null 2>&1
-ufw allow "${AC_TCP_PORT}/tcp"  > /dev/null 2>&1
-ufw allow "${AC_UDP_PORT}/udp"  > /dev/null 2>&1
-ufw allow "${AC_HTTP_PORT}/tcp" > /dev/null 2>&1
-ufw allow "${WEB_PORT}/tcp"     > /dev/null 2>&1
-ufw allow "${MGMT_PORT}/tcp"    > /dev/null 2>&1
+ufw allow ssh               > /dev/null 2>&1
+ufw allow "${AC_TCP_PORT}/tcp"   > /dev/null 2>&1
+ufw allow "${AC_UDP_PORT}/udp"   > /dev/null 2>&1
+ufw allow "${AC_HTTP_PORT}/tcp"  > /dev/null 2>&1
+ufw allow "${WEB_PORT}/tcp"      > /dev/null 2>&1
+ufw allow "${MGMT_PORT}/tcp"     > /dev/null 2>&1
 ok "Firewall rules applied"
 
 # ── Verify ────────────────────────────────────────────────────────────────────
@@ -378,6 +577,9 @@ echo "  ╠═══════════════════════
 echo -e "  ║  Web Panel:  http://${LOCAL_IP}:${WEB_PORT}                          ║"
 echo -e "  ║  API:        http://${LOCAL_IP}:${MGMT_PORT}                         ║"
 echo -e "  ║  AC Ports:   ${AC_TCP_PORT} TCP + ${AC_UDP_PORT} UDP (forward on router)   ║"
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+echo -e "  ║  Syncthing:  http://${LOCAL_IP}:8384                            ║"
+fi
 echo "  ╠══════════════════════════════════════════════════════════════╣"
 echo "  ║  Login:      ${ADMIN_USER} / (your chosen password)               ║"
 echo "  ╠══════════════════════════════════════════════════════════════╣"
@@ -386,10 +588,16 @@ echo "  ║  1. Open the web panel and log in                            ║"
 echo "  ║  2. Upload car & track content via the panel                 ║"
 echo "  ║  3. Configure and start the AC server                        ║"
 echo -e "  ║  4. Port-forward ${AC_TCP_PORT} TCP+UDP on your router               ║"
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+echo "  ║  5. Add this server in Syncthing on your PC using Device ID  ║"
+fi
 echo "  ╠══════════════════════════════════════════════════════════════╣"
 echo "  ║  Useful commands:                                            ║"
 echo "  ║  journalctl -u acadmin-api -f      (API logs)                ║"
 echo "  ║  journalctl -u assettoserver -f    (AC server logs)          ║"
 echo "  ║  systemctl restart acadmin-api     (restart after updates)   ║"
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+echo "  ║  systemctl status syncthing        (sync status)             ║"
+fi
 echo "  ╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
