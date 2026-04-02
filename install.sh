@@ -83,10 +83,14 @@ echo ""
 read -rp "  Set up Cloudflare Tunnel for remote panel access? [y/N]: " USE_CF
 USE_CF="${USE_CF:-n}"
 CF_TOKEN=""
+CF_HOSTNAME=""
 if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
   echo "  Get your token from: https://one.dash.cloudflare.com → Networks → Tunnels"
   read -rp "  Cloudflare tunnel token: " CF_TOKEN
   [[ -z "$CF_TOKEN" ]] && warn "No token provided — skipping Cloudflare setup" && USE_CF="n"
+  if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
+    read -rp "  Public hostname for the panel (e.g. admin.dead-bull.co.uk): " CF_HOSTNAME
+  fi
 fi
 
 # ── Proxmox CPU config ────────────────────────────────────────────────────────
@@ -218,17 +222,46 @@ chmod +x "${INSTALL_DIR}/webserver.py"
 # ── Proxmox CPU patch ─────────────────────────────────────────────────────────
 if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
   banner "Proxmox CPU Integration"
-  info "Testing Proxmox connection..."
 
-  STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
-    -H "Authorization: ${PVE_TOKEN}" \
-    "https://${PVE_HOST}:8006/api2/json/nodes/pve/lxc/${PVE_VMID}/status/current" || echo "000")
+  # Retry loop — give them 3 attempts to get credentials right
+  PROXMOX_OK=false
+  for ATTEMPT in 1 2 3; do
+    info "Testing Proxmox connection (attempt ${ATTEMPT}/3)..."
 
-  if [ "$STATUS" = "200" ]; then
-    ok "Proxmox connection successful (VMID ${PVE_VMID})"
-  else
-    warn "Proxmox returned HTTP ${STATUS} — check token/VMID. You can re-run configure_proxmox_cpu.sh later."
-  fi
+    STATUS=$(curl -sk -o /dev/null -w "%{http_code}" \
+      -H "Authorization: ${PVE_TOKEN}" \
+      "https://${PVE_HOST}:8006/api2/json/nodes/pve/lxc/${PVE_VMID}/status/current" || echo "000")
+
+    if [ "$STATUS" = "200" ]; then
+      ok "Proxmox connection successful (VMID ${PVE_VMID})"
+      PROXMOX_OK=true
+      break
+    else
+      warn "Proxmox returned HTTP ${STATUS}"
+      if [ "$ATTEMPT" -lt 3 ]; then
+        echo ""
+        echo "  Common causes:"
+        echo "    • Token format wrong — must be: PVEAPIToken=root@pam!tokenid=secret"
+        echo "    • VMID wrong — check the number in the Proxmox sidebar"
+        echo "    • Proxmox host IP wrong or unreachable"
+        echo ""
+        read -rp "  Try again with corrected values? [Y/n]: " RETRY
+        [[ "${RETRY:-y}" =~ ^[Nn]$ ]] && break
+        read -rp "  Proxmox host IP [${PVE_HOST}]: " NEW_HOST
+        [[ -n "$NEW_HOST" ]] && PVE_HOST="$NEW_HOST"
+        read -rp "  Proxmox API token [${PVE_TOKEN}]: " NEW_TOKEN
+        [[ -n "$NEW_TOKEN" ]] && PVE_TOKEN="$NEW_TOKEN"
+        read -rp "  LXC VMID [${PVE_VMID}]: " NEW_VMID
+        [[ -n "$NEW_VMID" ]] && PVE_VMID="$NEW_VMID"
+      else
+        echo ""
+        warn "Could not connect to Proxmox after 3 attempts."
+        warn "CPU will show 0% until fixed. Run configure_proxmox_cpu.sh after install."
+      fi
+    fi
+  done
+
+  if [ "$PROXMOX_OK" = "true" ]; then
 
   python3 << PYEOF
 import re, sys
@@ -272,8 +305,8 @@ try:
 except SyntaxError as e:
     print(f'\033[1;33m[WARN]\033[0m  Syntax check failed: {e} — check mgmt_api.py manually')
 PYEOF
-
-fi
+  fi # PROXMOX_OK
+fi # USE_PROXMOX
 
 # ── Initial config files ──────────────────────────────────────────────────────
 banner "Initial configuration"
@@ -520,11 +553,28 @@ EOF
 
   DEVICE_ID=$(syncthing --home="$ST_CONFIG" --device-id 2>/dev/null || echo "Check GUI")
   ok "Syncthing running"
+
   echo ""
-  echo -e "  ${BOLD}Syncthing Device ID:${NC}"
-  echo "  $DEVICE_ID"
+  echo -e "${BOLD}${CYAN}"
+  echo "  ┌─────────────────────────────────────────────────────────────────┐"
+  echo "  │  🔄  Syncthing Setup — Action Required                          │"
+  echo "  ├─────────────────────────────────────────────────────────────────┤"
+  echo -e "  │  Open in your browser:  http://${LOCAL_IP}:8384                │"
+  echo "  │                                                                 │"
+  echo "  │  Then on your PC / NAS:                                         │"
+  echo "  │  1. Open Syncthing                                              │"
+  echo "  │  2. Add Remote Device → paste the Device ID below              │"
+  echo "  │  3. Share your folders with this server                         │"
+  echo "  │  4. In the server GUI, accept the incoming connection           │"
+  echo "  │  5. Set folder type to Send Only on the PC side                 │"
+  echo "  │                                                                 │"
+  echo "  │  Device ID:                                                     │"
+  echo "  │  ${DEVICE_ID}  │"
+  echo "  └─────────────────────────────────────────────────────────────────┘"
+  echo -e "${NC}"
   echo ""
-  info "Open http://${LOCAL_IP}:8384 to accept your PC as a remote device"
+  read -rp "  Press ENTER to continue once you have noted the Device ID..." _
+
   ufw allow 8384/tcp > /dev/null 2>&1 || true
   ufw allow 22000/tcp > /dev/null 2>&1 || true
   ufw allow 22000/udp > /dev/null 2>&1 || true
@@ -569,35 +619,68 @@ done
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 LOCAL_IP=$(hostname -I | awk '{print $1}')
+
+# Build the direct panel URL
+PANEL_URL="http://${LOCAL_IP}:${WEB_PORT}/ac-admin.html"
+
+# Build FQDN URL if Cloudflare was configured
+CF_URL=""
+if [[ "$USE_CF" =~ ^[Yy]$ ]] && [[ -n "$CF_HOSTNAME" ]]; then
+  CF_URL="https://${CF_HOSTNAME}/ac-admin.html"
+fi
+
+# Get Syncthing device ID if installed
+ST_DEVICE_ID=""
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+  ST_DEVICE_ID=$(syncthing --home=/root/.local/share/syncthing --device-id 2>/dev/null || echo "Check http://${LOCAL_IP}:8384 → Actions → Show ID")
+fi
+
 echo ""
 echo -e "${BOLD}${GREEN}"
-echo "  ╔══════════════════════════════════════════════════════════════╗"
-echo "  ║                    Install Complete! 🏁                      ║"
-echo "  ╠══════════════════════════════════════════════════════════════╣"
-echo -e "  ║  Web Panel:  http://${LOCAL_IP}:${WEB_PORT}                          ║"
-echo -e "  ║  API:        http://${LOCAL_IP}:${MGMT_PORT}                         ║"
-echo -e "  ║  AC Ports:   ${AC_TCP_PORT} TCP + ${AC_UDP_PORT} UDP (forward on router)   ║"
-if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo -e "  ║  Syncthing:  http://${LOCAL_IP}:8384                            ║"
+echo "  ╔══════════════════════════════════════════════════════════════════╗"
+echo "  ║                   Install Complete! 🏁                           ║"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+echo "  ║  ACCESS THE PANEL                                                ║"
+echo -e "  ║  Local:   ${PANEL_URL}          ║"
+if [[ -n "$CF_URL" ]]; then
+echo -e "  ║  Public:  ${CF_URL}            ║"
 fi
-echo "  ╠══════════════════════════════════════════════════════════════╣"
-echo "  ║  Login:      ${ADMIN_USER} / (your chosen password)               ║"
-echo "  ╠══════════════════════════════════════════════════════════════╣"
-echo "  ║  Next steps:                                                 ║"
-echo "  ║  1. Open the web panel and log in                            ║"
-echo "  ║  2. Upload car & track content via the panel                 ║"
-echo "  ║  3. Configure and start the AC server                        ║"
-echo -e "  ║  4. Port-forward ${AC_TCP_PORT} TCP+UDP on your router               ║"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+echo "  ║  SERVICES                                                        ║"
+echo -e "  ║  AC Game Server:  ${LOCAL_IP}:${AC_TCP_PORT} TCP+UDP                  ║"
+echo -e "  ║  Management API:  http://${LOCAL_IP}:${MGMT_PORT}                     ║"
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo "  ║  5. Add this server in Syncthing on your PC using Device ID  ║"
+echo -e "  ║  Syncthing GUI:   http://${LOCAL_IP}:8384                        ║"
 fi
-echo "  ╠══════════════════════════════════════════════════════════════╣"
-echo "  ║  Useful commands:                                            ║"
-echo "  ║  journalctl -u acadmin-api -f      (API logs)                ║"
-echo "  ║  journalctl -u assettoserver -f    (AC server logs)          ║"
-echo "  ║  systemctl restart acadmin-api     (restart after updates)   ║"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+echo "  ║  LOGIN                                                           ║"
+echo -e "  ║  Username: ${ADMIN_USER}                                              ║"
+echo "  ║  Password: (the password you entered during setup)               ║"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]] && [[ -n "$ST_DEVICE_ID" ]]; then
+echo "  ║  SYNCTHING DEVICE ID (add this to Syncthing on your PC)         ║"
+echo "  ║                                                                  ║"
+echo -e "  ║  ${ST_DEVICE_ID:0:63} ║"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+fi
+echo "  ║  NEXT STEPS                                                      ║"
+echo "  ║  1. Open the panel URL above and log in                          ║"
+echo "  ║  2. Go to Schedule and add your first event                      ║"
+echo "  ║  3. Upload car & track content to the server                     ║"
+echo -e "  ║  4. Port-forward ${AC_TCP_PORT} TCP+UDP on your router for players      ║"
+if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
+echo "  ║  5. Configure your Cloudflare hostname in Zero Trust dashboard   ║"
+fi
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo "  ║  systemctl status syncthing        (sync status)             ║"
+echo "  ║  6. Add this server as a device in Syncthing on your PC         ║"
 fi
-echo "  ╚══════════════════════════════════════════════════════════════╝"
+echo "  ╠══════════════════════════════════════════════════════════════════╣"
+echo "  ║  USEFUL COMMANDS                                                 ║"
+echo "  ║  journalctl -u acadmin-api -f        (API logs)                  ║"
+echo "  ║  journalctl -u assettoserver -f      (AC server logs)            ║"
+echo "  ║  systemctl restart acadmin-api       (restart after updates)     ║"
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+echo "  ║  systemctl status syncthing          (sync status)               ║"
+fi
+echo "  ╚══════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
