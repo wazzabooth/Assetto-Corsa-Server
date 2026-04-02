@@ -325,6 +325,8 @@ NAME=${SERVER_NAME}
 CARS=ks_ferrari_f40
 TRACK=ks_silverstone
 CONFIG_TRACK=
+; Note: Default track/car above requires Kunos content.
+; Set up a Schedule in the panel to override with your own content.
 MAX_CLIENTS=${MAX_CLIENTS}
 UDP_PORT=${AC_UDP_PORT}
 TCP_PORT=${AC_TCP_PORT}
@@ -726,9 +728,10 @@ echo "  ╠═══════════════════════
 fi
 echo "  ║  NEXT STEPS                                                      ║"
 echo "  ║  1. Open the panel URL above and log in                          ║"
-echo "  ║  2. Go to Schedule and add your first event                      ║"
-echo "  ║  3. Upload car & track content to the server                     ║"
-echo -e "  ║  4. Port-forward ${AC_TCP_PORT} TCP+UDP on your router for players      ║"
+echo "  ║  2. Add car & track content (via Syncthing or manual upload)     ║"
+echo "  ║  3. Go to Schedule → add events using your installed content     ║"
+echo "  ║  4. Start the schedule — AssettoServer will launch automatically ║"
+echo -e "  ║  5. Port-forward ${AC_TCP_PORT} TCP+UDP on your router for players      ║"
 if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
 echo "  ║  5. Configure your Cloudflare hostname in Zero Trust dashboard   ║"
 fi
