@@ -663,7 +663,7 @@ fi
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo "  ║  SERVICES                                                        ║"
 echo -e "  ║  AC Game Server:  ${LOCAL_IP}:${AC_TCP_PORT} TCP+UDP                  ║"
-echo -e "  ║  Management API:  http://${LOCAL_IP}:${MGMT_PORT}                     ║"
+echo -e "  ║  Web Panel API:   http://${LOCAL_IP}:${MGMT_PORT} (internal)          ║"
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
 echo -e "  ║  Syncthing GUI:   http://${LOCAL_IP}:8384                        ║"
 fi
@@ -687,7 +687,7 @@ if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
 echo "  ║  5. Configure your Cloudflare hostname in Zero Trust dashboard   ║"
 fi
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo "  ║  6. Add this server as a device in Syncthing on your PC         ║"
+echo "  ║  5. Add this server as a device in Syncthing on your PC         ║"
 fi
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo "  ║  USEFUL COMMANDS                                                 ║"
