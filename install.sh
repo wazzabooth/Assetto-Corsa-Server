@@ -188,7 +188,7 @@ AS_VERSION=$(echo "$AS_RELEASE" | python3 -c "import json,sys; print(json.load(s
 AS_URL=$(echo "$AS_RELEASE" | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
-assets=[a for a in data.get('assets',[]) if 'linux' in a['name'].lower() and a['name'].endswith('.tar.gz')]
+assets=[a for a in data.get('assets',[]) if 'linux' in a['name'].lower() and 'arm' not in a['name'].lower() and 'aarch' not in a['name'].lower() and a['name'].endswith('.tar.gz')]
 print(assets[0]['browser_download_url'] if assets else '')
 " 2>/dev/null)
 
@@ -320,6 +320,7 @@ ok "Admin user '${ADMIN_USER}' created"
 
 cat > "${INSTALL_DIR}/cfg/server_cfg.ini" << EOF
 [SERVER]
+ADMIN_PASSWORD=${ADMIN_PASS}
 NAME=${SERVER_NAME}
 CARS=ks_ferrari_f40
 TRACK=ks_silverstone
@@ -357,6 +358,17 @@ RESULT_SCREEN_TIME=30
 MAX_CONTACTS_PER_KM=0
 LOOP_MODE=1
 SHOW_IN_LOBBY=0
+
+[WEATHER_0]
+GRAPHICS=3_clear
+BASE_TEMPERATURE_AMBIENT=18
+BASE_TEMPERATURE_ROAD=6
+VARIATION_AMBIENT=2
+VARIATION_ROAD=1
+WIND_BASE_SPEED_MIN=0
+WIND_BASE_SPEED_MAX=10
+WIND_BASE_DIRECTION=0
+WIND_VARIATION_DIRECTION=0
 EOF
 ok "server_cfg.ini written"
 
@@ -373,9 +385,11 @@ RESTRICTOR=0
 EOF
 ok "entry_list.ini written"
 
-cat > "${INSTALL_DIR}/cfg/extra_cfg.yml" << 'EOF'
+cat > "${INSTALL_DIR}/cfg/extra_cfg.yml" << EOF
 # AssettoServer extra configuration
 EnableRaceControl: true
+AdminPassword: ${ADMIN_PASS}
+BypassChecksumValidation: true
 EOF
 ok "extra_cfg.yml written"
 
@@ -564,7 +578,22 @@ EOF
   systemctl daemon-reload
   systemctl enable syncthing
   systemctl start syncthing
-  sleep 2
+  sleep 3
+
+  # Extract the generated API key and patch it into mgmt_api.py
+  ST_API_KEY=$(grep -o 'apikey>[^<]*' "$ST_CONFIG/config.xml" 2>/dev/null | head -1 | cut -d'>' -f2)
+  if [ -n "$ST_API_KEY" ] && [ -f "${INSTALL_DIR}/mgmt_api.py" ]; then
+    python3 << PYEOF
+import re
+src = open('${INSTALL_DIR}/mgmt_api.py').read()
+src = re.sub(r"SYNCTHING_KEY = '[^']*'", "SYNCTHING_KEY = '${ST_API_KEY}'", src)
+open('${INSTALL_DIR}/mgmt_api.py', 'w').write(src)
+print("  Syncthing API key patched into mgmt_api.py")
+PYEOF
+    systemctl restart acadmin-api 2>/dev/null || true
+  else
+    warn "Could not read Syncthing API key — update SYNCTHING_KEY in mgmt_api.py manually"
+  fi
 
   DEVICE_ID=$(syncthing --home="$ST_CONFIG" --device-id 2>/dev/null || echo "Check GUI")
   ok "Syncthing running"
