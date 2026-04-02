@@ -647,6 +647,11 @@ ufw allow "${AC_UDP_PORT}/udp"   > /dev/null 2>&1
 ufw allow "${AC_HTTP_PORT}/tcp"  > /dev/null 2>&1
 ufw allow "${WEB_PORT}/tcp"      > /dev/null 2>&1
 ufw allow "${MGMT_PORT}/tcp"     > /dev/null 2>&1
+if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
+  ufw allow 8384/tcp  > /dev/null 2>&1
+  ufw allow 22000/tcp > /dev/null 2>&1
+  ufw allow 22000/udp > /dev/null 2>&1
+fi
 ok "Firewall rules applied"
 
 # ── Verify ────────────────────────────────────────────────────────────────────
