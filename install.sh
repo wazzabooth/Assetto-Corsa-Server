@@ -389,7 +389,19 @@ cat > "${INSTALL_DIR}/cfg/extra_cfg.yml" << EOF
 # AssettoServer extra configuration
 EnableRaceControl: true
 AdminPassword: ${ADMIN_PASS}
-BypassChecksumValidation: true
+EnableAlternativeCarChecksums: false
+IgnoreConfigurationErrors:
+  MissingCarChecksums: true
+  MissingCarEtcChecksums: true
+  MissingCarEtcFolder: true
+  MissingDefaultSetup: true
+  MissingTrackParams: true
+  MissingAiSpline: true
+  UnsignedConfigurationFile: true
+  BrakePowerModifier: true
+  TyreBlanketNotAllowed: true
+  UnsafeAdminWhitelist: false
+  WrongServerDetails: false
 EOF
 ok "extra_cfg.yml written"
 
