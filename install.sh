@@ -498,9 +498,16 @@ if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
 
   # Open GUI to all interfaces (LAN reachable)
   if [ -f "$ST_CONFIG/config.xml" ]; then
-    sed -i 's|<address>127\.0\.0\.1:8384</address>|<address>0.0.0.0:8384</address>|g' \
-      "$ST_CONFIG/config.xml"
+    python3 -c "
+import sys
+cfg = open('$ST_CONFIG/config.xml').read()
+cfg = cfg.replace('<address>127.0.0.1:8384</address>', '<address>0.0.0.0:8384</address>')
+open('$ST_CONFIG/config.xml', 'w').write(cfg)
+"
     ok "GUI accessible on port 8384"
+  else
+    warn "Syncthing config not found — GUI may only be accessible on localhost"
+    warn "Run: sed -i 's|127.0.0.1:8384|0.0.0.0:8384|' /root/.local/share/syncthing/config.xml"
   fi
 
   # Inject receive-only folder entries
@@ -523,7 +530,15 @@ if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
       <markerName>.stfolder</markerName>
     </folder>"
     done
-    sed -i "s|</configuration>|${FOLDER_XML}\n</configuration>|" "$ST_CONFIG/config.xml"
+    # Use python to inject folder XML safely (avoids sed delimiter conflicts with paths)
+    python3 << STEOF
+import re
+cfg = open('$ST_CONFIG/config.xml').read()
+folder_xml = """${FOLDER_XML}"""
+cfg = cfg.replace('</configuration>', folder_xml + '\n</configuration>', 1)
+open('$ST_CONFIG/config.xml', 'w').write(cfg)
+print("  Folders written to config")
+STEOF
     ok "${#SYNC_FOLDERS[@]} receive-only folder(s) configured"
   fi
 
