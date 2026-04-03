@@ -30,16 +30,10 @@ banner() {
 # ── Root check ────────────────────────────────────────────────────────────────
 [[ $EUID -ne 0 ]] && error "Please run as root: sudo bash install.sh"
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# ── Static config ─────────────────────────────────────────────────────────────
 INSTALL_DIR="/opt/assettoserver"
 REPO_BASE="https://raw.githubusercontent.com/wazzabooth/Assetto-Corsa-Server/main"
 AS_GITHUB="https://api.github.com/repos/compujuckel/AssettoServer/releases/latest"
-
-AC_HTTP_PORT=8081
-AC_TCP_PORT=9600
-AC_UDP_PORT=9600
-MGMT_PORT=8083
-WEB_PORT=8082
 
 # ── Welcome ───────────────────────────────────────────────────────────────────
 clear
@@ -52,8 +46,8 @@ echo -e "${NC}"
 echo "  This script will install:"
 echo "   • AssettoServer (latest release from GitHub)"
 echo "   • AC Admin management panel"
-echo "   • Flask API backend (port ${MGMT_PORT})"
-echo "   • Web panel server (port ${WEB_PORT})"
+echo "   • Flask API backend"
+echo "   • Web panel server"
 echo "   • Systemd services (auto-start on boot)"
 echo "   • UFW firewall rules"
 echo "   • Syncthing content sync (optional)"
@@ -79,6 +73,37 @@ SERVER_NAME="${SERVER_NAME:-My AC Server}"
 read -rp "  Max clients [20]: " MAX_CLIENTS
 MAX_CLIENTS="${MAX_CLIENTS:-20}"
 
+# ── Port configuration ────────────────────────────────────────────────────────
+echo ""
+echo -e "  ${CYAN}── Port Configuration ───────────────────────────────────────────${NC}"
+echo "  If running multiple servers from the same external IP, each server"
+echo "  must use unique ports. Recommended port sets:"
+echo ""
+echo "    Server      AC HTTP  Web Panel  Mgmt API  Game TCP/UDP"
+echo "    ──────────  ───────  ─────────  ────────  ────────────"
+echo "    GT (first)   8081     8082       8083      9600"
+echo "    Road         8082     8085       8086      9601"
+echo "    Nordschleife 8083     8087       8088      9602"
+echo "    IoM          8084     8089       8090      9603"
+echo ""
+echo "  AC HTTP port must be forwarded on your router for players to join."
+echo "  Game TCP/UDP port must also be forwarded for players to connect."
+echo "  Web Panel and Mgmt API ports are internal only (no forwarding needed)."
+echo ""
+
+read -rp "  AC HTTP port [8081]: " AC_HTTP_PORT
+AC_HTTP_PORT="${AC_HTTP_PORT:-8081}"
+
+read -rp "  Web panel port [8082]: " WEB_PORT
+WEB_PORT="${WEB_PORT:-8082}"
+
+read -rp "  Management API port [8083]: " MGMT_PORT
+MGMT_PORT="${MGMT_PORT:-8083}"
+
+read -rp "  Game TCP/UDP port [9600]: " AC_GAME_PORT
+AC_GAME_PORT="${AC_GAME_PORT:-9600}"
+
+# ── Cloudflare ────────────────────────────────────────────────────────────────
 echo ""
 read -rp "  Set up Cloudflare Tunnel for remote panel access? [y/N]: " USE_CF
 USE_CF="${USE_CF:-n}"
@@ -126,7 +151,6 @@ if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
   echo "  Common choices:"
   echo "    ${INSTALL_DIR}/content/cars"
   echo "    ${INSTALL_DIR}/content/tracks"
-  echo "    ${INSTALL_DIR}/content"
   echo ""
   while true; do
     read -rp "  Folder path (or ENTER to finish): " FPATH
@@ -149,10 +173,12 @@ echo "  Admin user:    $ADMIN_USER"
 echo "  Server name:   $SERVER_NAME"
 echo "  Max clients:   $MAX_CLIENTS"
 echo "  Install dir:   $INSTALL_DIR"
-echo "  Web panel:     http://${LOCAL_IP}:${WEB_PORT}"
-echo "  AC ports:      ${AC_TCP_PORT} TCP/UDP"
-[[ "$USE_CF" =~ ^[Yy]$ ]]       && echo "  Cloudflare:    Yes"          || echo "  Cloudflare:    No"
-[[ "$USE_PROXMOX" =~ ^[Yy]$ ]]  && echo "  Proxmox CPU:   ${PVE_HOST} VMID ${PVE_VMID}" || echo "  Proxmox CPU:   No"
+echo "  AC HTTP port:  $AC_HTTP_PORT  (forward this on your router)"
+echo "  Game port:     $AC_GAME_PORT TCP+UDP  (forward this on your router)"
+echo "  Web panel:     http://${LOCAL_IP}:${WEB_PORT}  (internal only)"
+echo "  Mgmt API:      http://${LOCAL_IP}:${MGMT_PORT}  (internal only)"
+[[ "$USE_CF" =~ ^[Yy]$ ]]        && echo "  Cloudflare:    Yes"          || echo "  Cloudflare:    No"
+[[ "$USE_PROXMOX" =~ ^[Yy]$ ]]   && echo "  Proxmox CPU:   ${PVE_HOST} VMID ${PVE_VMID}" || echo "  Proxmox CPU:   No"
 [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]] && echo "  Syncthing:     Yes (${#SYNC_FOLDERS[@]} folder(s))" || echo "  Syncthing:     No"
 echo "  ─────────────────────────────────────────"
 echo ""
@@ -219,11 +245,53 @@ done
 chmod +x "${INSTALL_DIR}/mgmt_api.py"
 chmod +x "${INSTALL_DIR}/webserver.py"
 
+# ── Patch ports into app files ────────────────────────────────────────────────
+banner "Port configuration"
+info "Patching ports into webserver.py and mgmt_api.py..."
+
+python3 << PYEOF
+import re, sys
+
+# ── webserver.py ──────────────────────────────────────────────────────────────
+# Variables: PORT (web panel), MGMT (mgmt API URL), AC_API (AC HTTP URL)
+src = open('${INSTALL_DIR}/webserver.py').read()
+
+src = re.sub(r'^PORT\s*=\s*\d+', 'PORT   = ${WEB_PORT}', src, flags=re.MULTILINE)
+src = re.sub(r"^MGMT\s*=\s*'http://127\.0\.0\.1:\d+'", "MGMT   = 'http://127.0.0.1:${MGMT_PORT}'", src, flags=re.MULTILINE)
+src = re.sub(r"^AC_API\s*=\s*'http://127\.0\.0\.1:\d+'", "AC_API = 'http://127.0.0.1:${AC_HTTP_PORT}'", src, flags=re.MULTILINE)
+
+open('${INSTALL_DIR}/webserver.py', 'w').write(src)
+
+# Verify
+for line in open('${INSTALL_DIR}/webserver.py'):
+    if line.strip().startswith(('PORT', 'MGMT', 'AC_API')):
+        print(f'  webserver.py: {line.strip()}')
+
+# ── mgmt_api.py ───────────────────────────────────────────────────────────────
+# Variables: AC_HTTP (AC HTTP URL), app.run port
+src = open('${INSTALL_DIR}/mgmt_api.py').read()
+
+src = re.sub(r"^AC_HTTP\s*=\s*'http://127\.0\.0\.1:\d+'", "AC_HTTP = 'http://127.0.0.1:${AC_HTTP_PORT}'", src, flags=re.MULTILINE)
+src = re.sub(r"app\.run\(host='0\.0\.0\.0',\s*port=\d+\)", "app.run(host='0.0.0.0', port=${MGMT_PORT})", src)
+
+open('${INSTALL_DIR}/mgmt_api.py', 'w').write(src)
+
+# Verify
+for line in open('${INSTALL_DIR}/mgmt_api.py'):
+    if 'AC_HTTP' in line and '=' in line and 'req' not in line:
+        print(f'  mgmt_api.py:  {line.strip()}')
+    if 'app.run' in line:
+        print(f'  mgmt_api.py:  {line.strip()}')
+
+print('  Port patching complete')
+PYEOF
+
+ok "Ports patched into webserver.py and mgmt_api.py"
+
 # ── Proxmox CPU patch ─────────────────────────────────────────────────────────
 if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
   banner "Proxmox CPU Integration"
 
-  # Retry loop — give them 3 attempts to get credentials right
   PROXMOX_OK=false
   for ATTEMPT in 1 2 3; do
     info "Testing Proxmox connection (attempt ${ATTEMPT}/3)..."
@@ -254,7 +322,6 @@ if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
         read -rp "  LXC VMID [${PVE_VMID}]: " NEW_VMID
         [[ -n "$NEW_VMID" ]] && PVE_VMID="$NEW_VMID"
       else
-        echo ""
         warn "Could not connect to Proxmox after 3 attempts."
         warn "CPU will show 0% until fixed. Run configure_proxmox_cpu.sh after install."
       fi
@@ -262,8 +329,7 @@ if [[ "$USE_PROXMOX" =~ ^[Yy]$ ]]; then
   done
 
   if [ "$PROXMOX_OK" = "true" ]; then
-
-  python3 << PYEOF
+    python3 << PYEOF
 import re, sys
 
 src = open('${INSTALL_DIR}/mgmt_api.py').read()
@@ -305,8 +371,8 @@ try:
 except SyntaxError as e:
     print(f'\033[1;33m[WARN]\033[0m  Syntax check failed: {e} — check mgmt_api.py manually')
 PYEOF
-  fi # PROXMOX_OK
-fi # USE_PROXMOX
+  fi
+fi
 
 # ── Initial config files ──────────────────────────────────────────────────────
 banner "Initial configuration"
@@ -325,11 +391,9 @@ NAME=${SERVER_NAME}
 CARS=ks_ferrari_f40
 TRACK=ks_silverstone
 CONFIG_TRACK=
-; Note: Default track/car above requires Kunos content.
-; Set up a Schedule in the panel to override with your own content.
 MAX_CLIENTS=${MAX_CLIENTS}
-UDP_PORT=${AC_UDP_PORT}
-TCP_PORT=${AC_TCP_PORT}
+UDP_PORT=${AC_GAME_PORT}
+TCP_PORT=${AC_GAME_PORT}
 HTTP_PORT=${AC_HTTP_PORT}
 REGISTER_TO_LOBBY=0
 PICKUP_MODE_ENABLED=1
@@ -371,6 +435,12 @@ WIND_BASE_SPEED_MIN=0
 WIND_BASE_SPEED_MAX=10
 WIND_BASE_DIRECTION=0
 WIND_VARIATION_DIRECTION=0
+
+[RACE]
+TIME=0
+LAPS=5
+WAIT_TIME=60
+IS_OPEN=1
 EOF
 ok "server_cfg.ini written"
 
@@ -388,7 +458,6 @@ EOF
 ok "entry_list.ini written"
 
 cat > "${INSTALL_DIR}/cfg/extra_cfg.yml" << EOF
-# AssettoServer extra configuration
 EnableRaceControl: true
 AdminPassword: ${ADMIN_PASS}
 EnableAlternativeCarChecksums: false
@@ -513,21 +582,17 @@ if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
   apt-get install -y -qq syncthing
   ok "Syncthing installed"
 
-  # Create any missing sync folders
   for FPATH in "${SYNC_FOLDERS[@]}"; do
     mkdir -p "$FPATH"
   done
 
-  # Generate config by running briefly
   info "Generating Syncthing config..."
   ST_CONFIG="/root/.local/share/syncthing"
   timeout 5 syncthing --home="$ST_CONFIG" --no-browser 2>/dev/null || true
   sleep 2
 
-  # Open GUI to all interfaces (LAN reachable)
   if [ -f "$ST_CONFIG/config.xml" ]; then
     python3 -c "
-import sys
 cfg = open('$ST_CONFIG/config.xml').read()
 cfg = cfg.replace('<address>127.0.0.1:8384</address>', '<address>0.0.0.0:8384</address>')
 open('$ST_CONFIG/config.xml', 'w').write(cfg)
@@ -535,10 +600,8 @@ open('$ST_CONFIG/config.xml', 'w').write(cfg)
     ok "GUI accessible on port 8384"
   else
     warn "Syncthing config not found — GUI may only be accessible on localhost"
-    warn "Run: sed -i 's|127.0.0.1:8384|0.0.0.0:8384|' /root/.local/share/syncthing/config.xml"
   fi
 
-  # Inject receive-only folder entries
   if [ ${#SYNC_FOLDERS[@]} -gt 0 ] && [ -f "$ST_CONFIG/config.xml" ]; then
     FOLDER_XML=""
     for i in "${!SYNC_FOLDERS[@]}"; do
@@ -558,9 +621,7 @@ open('$ST_CONFIG/config.xml', 'w').write(cfg)
       <markerName>.stfolder</markerName>
     </folder>"
     done
-    # Use python to inject folder XML safely (avoids sed delimiter conflicts with paths)
     python3 << STEOF
-import re
 cfg = open('$ST_CONFIG/config.xml').read()
 folder_xml = """${FOLDER_XML}"""
 cfg = cfg.replace('</configuration>', folder_xml + '\n</configuration>', 1)
@@ -570,7 +631,6 @@ STEOF
     ok "${#SYNC_FOLDERS[@]} receive-only folder(s) configured"
   fi
 
-  # Systemd service
   cat > /etc/systemd/system/syncthing.service << EOF
 [Unit]
 Description=Syncthing — Content Sync
@@ -594,7 +654,6 @@ EOF
   systemctl start syncthing
   sleep 3
 
-  # Extract the generated API key and patch it into mgmt_api.py
   ST_API_KEY=$(grep -o 'apikey>[^<]*' "$ST_CONFIG/config.xml" 2>/dev/null | head -1 | cut -d'>' -f2)
   if [ -n "$ST_API_KEY" ] && [ -f "${INSTALL_DIR}/mgmt_api.py" ]; then
     python3 << PYEOF
@@ -623,7 +682,7 @@ PYEOF
   echo "  │  1. Open Syncthing                                              │"
   echo "  │  2. Add Remote Device → paste the Device ID below              │"
   echo "  │  3. Share your folders with this server                         │"
-  echo "  │  4. In the server GUI, accept the incoming connection           │"
+  echo "  │  4. Accept the incoming share request in the server GUI         │"
   echo "  │  5. Set folder type to Send Only on the PC side                 │"
   echo "  │                                                                 │"
   echo "  │  Device ID:                                                     │"
@@ -655,9 +714,9 @@ fi
 # ── Firewall ──────────────────────────────────────────────────────────────────
 banner "Firewall"
 ufw --force enable > /dev/null 2>&1 || true
-ufw allow ssh               > /dev/null 2>&1
-ufw allow "${AC_TCP_PORT}/tcp"   > /dev/null 2>&1
-ufw allow "${AC_UDP_PORT}/udp"   > /dev/null 2>&1
+ufw allow ssh                    > /dev/null 2>&1
+ufw allow "${AC_GAME_PORT}/tcp"  > /dev/null 2>&1
+ufw allow "${AC_GAME_PORT}/udp"  > /dev/null 2>&1
 ufw allow "${AC_HTTP_PORT}/tcp"  > /dev/null 2>&1
 ufw allow "${WEB_PORT}/tcp"      > /dev/null 2>&1
 ufw allow "${MGMT_PORT}/tcp"     > /dev/null 2>&1
@@ -680,19 +739,43 @@ for SVC in acadmin-api acadmin-web; do
   fi
 done
 
+# Verify port patching worked
+info "Verifying port configuration..."
+python3 << PYEOF
+import re
+
+ws = open('${INSTALL_DIR}/webserver.py').read()
+ma = open('${INSTALL_DIR}/mgmt_api.py').read()
+
+checks = [
+    ('webserver.py PORT',   r'PORT\s*=\s*(\d+)', ws,   '${WEB_PORT}'),
+    ('webserver.py MGMT',   r"MGMT\s*=.*?:(\d+)'", ws,  '${MGMT_PORT}'),
+    ('webserver.py AC_API', r"AC_API\s*=.*?:(\d+)'", ws, '${AC_HTTP_PORT}'),
+    ('mgmt_api.py AC_HTTP', r"AC_HTTP\s*=.*?:(\d+)'", ma, '${AC_HTTP_PORT}'),
+    ('mgmt_api.py app.run', r"app\.run.*?port=(\d+)", ma, '${MGMT_PORT}'),
+]
+
+all_ok = True
+for name, pattern, src, expected in checks:
+    m = re.search(pattern, src)
+    actual = m.group(1) if m else 'NOT FOUND'
+    status = '\033[0;32m[ OK ]\033[0m' if actual == expected else '\033[0;31m[ERR ]\033[0m'
+    print(f'  {status}  {name}: {actual}')
+    if actual != expected:
+        all_ok = False
+
+if not all_ok:
+    print('\n  \033[1;33m[WARN]\033[0m  Some ports may not have patched correctly.')
+    print('         Check the files manually in ${INSTALL_DIR}/')
+PYEOF
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 LOCAL_IP=$(hostname -I | awk '{print $1}')
-
-# Build the direct panel URL
 PANEL_URL="http://${LOCAL_IP}:${WEB_PORT}/ac-admin.html"
-
-# Build FQDN URL if Cloudflare was configured
 CF_URL=""
 if [[ "$USE_CF" =~ ^[Yy]$ ]] && [[ -n "$CF_HOSTNAME" ]]; then
   CF_URL="https://${CF_HOSTNAME}/ac-admin.html"
 fi
-
-# Get Syncthing device ID if installed
 ST_DEVICE_ID=""
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
   ST_DEVICE_ID=$(syncthing --home=/root/.local/share/syncthing --device-id 2>/dev/null || echo "Check http://${LOCAL_IP}:8384 → Actions → Show ID")
@@ -704,16 +787,20 @@ echo "  ╔═══════════════════════
 echo "  ║                   Install Complete! 🏁                           ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo "  ║  ACCESS THE PANEL                                                ║"
-echo -e "  ║  Local:   ${PANEL_URL}          ║"
+echo -e "  ║  Local:   ${PANEL_URL}"
 if [[ -n "$CF_URL" ]]; then
-echo -e "  ║  Public:  ${CF_URL}            ║"
+echo -e "  ║  Public:  ${CF_URL}"
 fi
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
-echo "  ║  SERVICES                                                        ║"
-echo -e "  ║  AC Game Server:  ${LOCAL_IP}:${AC_TCP_PORT} TCP+UDP                  ║"
-echo -e "  ║  Web Panel API:   http://${LOCAL_IP}:${MGMT_PORT} (internal)          ║"
+echo "  ║  PORTS — FORWARD THESE ON YOUR ROUTER                           ║"
+echo -e "  ║  AC HTTP API:  external ${AC_HTTP_PORT} → ${LOCAL_IP}:${AC_HTTP_PORT}              ║"
+echo -e "  ║  Game port:    external ${AC_GAME_PORT} TCP+UDP → ${LOCAL_IP}:${AC_GAME_PORT}      ║"
+echo "  ║                                                                  ║"
+echo "  ║  INTERNAL ONLY (no port forward needed)                          ║"
+echo -e "  ║  Web panel:    http://${LOCAL_IP}:${WEB_PORT}                        ║"
+echo -e "  ║  Mgmt API:     http://${LOCAL_IP}:${MGMT_PORT}                       ║"
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo -e "  ║  Syncthing GUI:   http://${LOCAL_IP}:8384                        ║"
+echo -e "  ║  Syncthing:    http://${LOCAL_IP}:8384                           ║"
 fi
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo "  ║  LOGIN                                                           ║"
@@ -721,8 +808,7 @@ echo -e "  ║  Username: ${ADMIN_USER}                                         
 echo "  ║  Password: (the password you entered during setup)               ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]] && [[ -n "$ST_DEVICE_ID" ]]; then
-echo "  ║  SYNCTHING DEVICE ID (add this to Syncthing on your PC)         ║"
-echo "  ║                                                                  ║"
+echo "  ║  SYNCTHING DEVICE ID                                             ║"
 echo -e "  ║  ${ST_DEVICE_ID:0:63} ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 fi
@@ -731,13 +817,7 @@ echo "  ║  1. Open the panel URL above and log in                          ║
 echo "  ║  2. Add car & track content (via Syncthing or manual upload)     ║"
 echo "  ║  3. Go to Schedule → add events using your installed content     ║"
 echo "  ║  4. Start the schedule — AssettoServer will launch automatically ║"
-echo -e "  ║  5. Port-forward ${AC_TCP_PORT} TCP+UDP on your router for players      ║"
-if [[ "$USE_CF" =~ ^[Yy]$ ]]; then
-echo "  ║  5. Configure your Cloudflare hostname in Zero Trust dashboard   ║"
-fi
-if [[ "$USE_SYNCTHING" =~ ^[Yy]$ ]]; then
-echo "  ║  5. Add this server as a device in Syncthing on your PC         ║"
-fi
+echo -e "  ║  5. Forward ports ${AC_HTTP_PORT} and ${AC_GAME_PORT} TCP+UDP on your router         ║"
 echo "  ╠══════════════════════════════════════════════════════════════════╣"
 echo "  ║  USEFUL COMMANDS                                                 ║"
 echo "  ║  journalctl -u acadmin-api -f        (API logs)                  ║"
